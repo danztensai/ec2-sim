@@ -40,6 +40,19 @@ IMDS_GATEWAY = os.environ.get("EC2SIM_IMDS_GATEWAY", "169.254.169.1")
 IMDS_ADDRESS = "169.254.169.254"
 IMDS_PROXY_IMAGE = os.environ.get("EC2SIM_IMDS_PROXY_IMAGE", "nginx:1.27-alpine")
 
+# How the host reaches instance IPs:
+#   routed  - container IPs are routable from the host (Linux, WSL2, OrbStack)
+#   bastion - they aren't (Docker Desktop on macOS/Windows): run an SSH jump host
+#             on 127.0.0.1:BASTION_PORT attached to every instance network
+#   auto    - detect from `docker info`
+NETWORK_MODE = os.environ.get("EC2SIM_NETWORK_MODE", "auto").strip().lower()
+BASTION_PORT = int(os.environ.get("EC2SIM_BASTION_PORT", "2222"))
+BASTION_PUBKEY = os.environ.get("EC2SIM_BASTION_PUBKEY", "")
+
+# Where the IMDS backend listens in bastion mode (the proxy container reaches it
+# via host.docker.internal). In routed mode it binds to IMDS_GATEWAY.
+IMDS_BIND = os.environ.get("EC2SIM_IMDS_BIND", "127.0.0.1")
+
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
 
 # Prefix for every Docker object ec2-sim creates.

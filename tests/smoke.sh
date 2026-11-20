@@ -6,7 +6,13 @@ EP=${EC2SIM_ENDPOINT:-http://localhost:4566}
 ec2() { aws --endpoint-url "$EP" ec2 "$@"; }
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 BASE=ami-0ec2511a120230001
-ssh_() { ssh -i "$WORK/key.pem" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=3 "$@"; }
+SSHO=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=3)
+# EC2SIM_BASTION=127.0.0.1[:port] when ec2-sim runs in bastion mode (Docker Desktop); needs sshpass.
+if [[ -n ${EC2SIM_BASTION:-} ]]; then
+  BH=${EC2SIM_BASTION%%:*}; BP=2222; [[ $EC2SIM_BASTION == *:* ]] && BP=${EC2SIM_BASTION##*:}
+  SSHO+=(-o "ProxyCommand=sshpass -p ec2sim ssh ${SSHO[*]} -p $BP -W %h:%p ec2sim@$BH")
+fi
+ssh_() { ssh -i "$WORK/key.pem" "${SSHO[@]}" "$@"; }
 wait_ssh() { for _ in $(seq 1 30); do ssh_ "ec2-user@$1" true 2>/dev/null && return 0; sleep 1; done; echo "ssh to $1 failed"; return 1; }
 
 echo "== base AMIs"; ec2 describe-images --owners amazon 099720109477 --filters Name=name,Values='*ec2sim*' --query 'Images[].[ImageId,Name,RootDeviceType]' --output text

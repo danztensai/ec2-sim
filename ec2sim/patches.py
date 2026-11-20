@@ -61,6 +61,15 @@ def _user_data_b64(user_data: Any) -> str | None:
         return base64.b64encode(user_data.encode()).decode()
 
 
+def _arch() -> str:
+    """EC2 architecture matching the Docker engine (arm64 on Apple Silicon)."""
+    if VM is not None:
+        return VM.arch
+    import platform
+
+    return "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
+
+
 def _set_public_ip(instance: Instance, ip: str | None) -> None:
     if ip and instance.nics:
         instance.nics[0].public_ip = ip
@@ -84,7 +93,7 @@ def apply(vm: DockerVMManager | None) -> None:
                 owner_alias=base.owner_alias or None,
                 public=True,
                 virtualization_type="hvm",
-                architecture="x86_64",
+                architecture=_arch(),
                 creation_date=BASE_CREATION_DATE,
                 image_location=f"docker:{base.docker_image}",
                 hypervisor="xen",
@@ -117,7 +126,7 @@ def apply(vm: DockerVMManager | None) -> None:
                 description=meta.get("description", ""),
                 owner_id=self.account_id,  # type: ignore[attr-defined]
                 virtualization_type="hvm",
-                architecture=meta.get("architecture") or "x86_64",
+                architecture=meta.get("architecture") or _arch(),
                 creation_date=created,
                 image_location=f"docker:{config.AMI_REPO}:{ami_id}",
                 root_device_type="ebs",
@@ -133,7 +142,7 @@ def apply(vm: DockerVMManager | None) -> None:
             "region": backend.region_name,
             "name": ami.name or "",
             "description": ami.description or "",
-            "architecture": ami.architecture or "x86_64",
+            "architecture": ami.architecture or _arch(),
         }
         labels.update({k: v for k, v in extra.items() if v is not None})
         return labels
@@ -143,6 +152,7 @@ def apply(vm: DockerVMManager | None) -> None:
                      description: str, tag_specifications: list[dict[str, Any]]):
         ami = original(self, instance_id, name, description, tag_specifications)
         ami.root_device_type = "ebs"
+        ami.architecture = _arch()
         if VM is not None and VM.has_instance(instance_id):
             ami.state = "pending"
             try:

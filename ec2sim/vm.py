@@ -35,6 +35,65 @@ class DockerVMManager:
         self._net_lock = threading.Lock()
         self._built: set[str] = set()
         self.imds_network = None
+        self.info = self.client.info()
+        # EC2 architecture of the images this engine builds and runs.
+        self.arch = "arm64" if self.info.get("Architecture") in ("aarch64", "arm64") else "x86_64"
+        self.network_mode = self._detect_network_mode()
+        self.bastion = None
+
+    def _detect_network_mode(self) -> str:
+        if config.NETWORK_MODE in ("routed", "bastion"):
+            LOG.info("network mode: %s (EC2SIM_NETWORK_MODE)", config.NETWORK_MODE)
+            return config.NETWORK_MODE
+        os_name = self.info.get("OperatingSystem", "")
+        # Docker Desktop (macOS/Windows) runs the engine in a VM whose bridge
+        # networks aren't routable from the host. OrbStack and native Linux/WSL2
+        # engines route container IPs to the host.
+        if "Docker Desktop" in os_name:
+            mode = "bastion"
+        else:
+            mode = "routed"
+        LOG.info("network mode: %s (engine: %s)", mode, os_name or "unknown")
+        return mode
+
+    # ---------------------------------------------------------------- bastion
+    BASTION = f"{config.PREFIX}-bastion"
+
+    def ensure_bastion(self) -> None:
+        """SSH jump host on 127.0.0.1:BASTION_PORT for hosts that can't reach
+        instance IPs directly. Joined to every instance network on demand."""
+        ref = f"{config.PREFIX}/bastion:latest"
+        try:
+            self.client.images.get(ref)
+        except ImageNotFound:
+            LOG.info("building %s", ref)
+            self.client.images.build(path=str(config.IMAGES_DIR),
+                                     dockerfile="bastion/Dockerfile", tag=ref, rm=True)
+        try:
+            self.client.containers.get(self.BASTION).remove(force=True)
+        except NotFound:
+            pass
+        self.bastion = self.client.containers.run(
+            ref,
+            name=self.BASTION,
+            detach=True,
+            labels={_label("bastion"): "true"},
+            environment={"EC2SIM_BASTION_PUBKEY": config.BASTION_PUBKEY},
+            ports={"22/tcp": ("127.0.0.1", config.BASTION_PORT)},
+        )
+        LOG.info("SSH bastion on 127.0.0.1:%s (user ec2sim, password ec2sim): "
+                 "ssh -J ec2sim@127.0.0.1:%s <user>@<instance-ip>",
+                 config.BASTION_PORT, config.BASTION_PORT)
+
+    def _attach_bastion(self, network) -> None:
+        if self.bastion is None:
+            return
+        network.reload()
+        if self.bastion.id not in network.attrs.get("Containers", {}):
+            try:
+                network.connect(self.bastion)
+            except APIError as e:
+                LOG.warning("could not attach bastion to %s: %s", network.name, e.explanation)
 
     # ------------------------------------------------------------ base images
     def ensure_base_image(self, base: BaseAmi) -> str:
@@ -116,6 +175,7 @@ class DockerVMManager:
     ) -> str:
         """Start the container for an instance; returns its IP (inside the subnet when possible)."""
         network, matches = self._network_for_subnet(subnet_id, subnet_cidr)
+        self._attach_bastion(network)
         ip: str | None = None
         if matches and subnet_cidr:
             ip = private_ip if self._usable_ip(private_ip, subnet_cidr) and \
@@ -195,9 +255,10 @@ class DockerVMManager:
                 self.client.containers.get(self.IMDS_PROXY).remove(force=True)
             except NotFound:
                 pass
+            upstream = config.IMDS_GATEWAY if self.network_mode == "routed" else "host.docker.internal"
             conf = (
                 "server { listen 80; location / { "
-                f"proxy_pass http://{config.IMDS_GATEWAY}:{port}; "
+                f"proxy_pass http://{upstream}:{port}; "
                 "proxy_set_header X-Forwarded-For $remote_addr; proxy_set_header Host $host; } }"
             )
             try:
@@ -212,6 +273,7 @@ class DockerVMManager:
                 labels={_label("imds"): "true"},
                 detach=True,
                 network=None,
+                extra_hosts={"host.docker.internal": "host-gateway"},
             )
             try:
                 self.client.api.disconnect_container_from_network(proxy.id, "bridge")
@@ -357,17 +419,16 @@ class DockerVMManager:
         """Remove instance containers and subnet networks (AMI images are kept)."""
         if not config.REMOVE_CONTAINERS:
             return
+        # Containers first (instances, IMDS proxy, bastion), then the networks they used.
         for c in self.client.containers.list(all=True, filters={"label": _label("instance_id")}):
             if c.labels.get(_label("instance_id")):
                 c.remove(force=True)
-        for n in self.client.networks.list(filters={"label": _label("subnet_id")}):
-            try:
-                n.remove()
-            except APIError:
-                pass
-        for c in self.client.containers.list(all=True, filters={"label": _label("imds")}):
-            c.remove(force=True)
-        for n in self.client.networks.list(filters={"label": _label("imds")}) + \
+        for key in ("imds", "bastion"):
+            for c in self.client.containers.list(all=True, filters={"label": _label(key)}):
+                c.remove(force=True)
+        self.bastion = None
+        for n in self.client.networks.list(filters={"label": _label("subnet_id")}) + \
+                self.client.networks.list(filters={"label": _label("imds")}) + \
                 self.client.networks.list(filters={"label": _label("shared")}):
             try:
                 n.remove()

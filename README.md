@@ -28,7 +28,8 @@ also drive Docker (`ec2sim/vm.py`).
 
 ## Requirements
 
-- Linux or WSL2 with a local Docker Engine (instance IPs must be reachable from the host)
+- Docker: native Docker Engine on Linux or WSL2, OrbStack, or Docker Desktop on
+  macOS/Windows (see [macOS and Docker Desktop](#macos-and-docker-desktop))
 - [uv](https://docs.astral.sh/uv/) and Python 3.12+
 - AWS CLI (optional, for the examples and tests)
 
@@ -61,6 +62,47 @@ ec2 terminate-instances --instance-ids i-...
 
 Ctrl+C stops the server and removes all instance containers. AMIs you created are kept.
 
+## macOS and Docker Desktop
+
+ec2-sim needs to reach instance IPs (e.g. `172.31.0.4`) from the host for SSH.
+That works with native Docker Engine (Linux, WSL2) and OrbStack. Docker
+Desktop runs containers inside a hidden VM, so those IPs **aren't routable
+from macOS or Windows**, and SSH (including Packer's) times out.
+
+ec2-sim detects Docker Desktop and switches to **bastion mode** automatically.
+It starts an SSH jump host on `127.0.0.1:2222` (user `ec2sim`, password
+`ec2sim`) that is attached to every instance network. Connect to instances
+through it; their IPs and everything else stay the same:
+
+```bash
+ssh -J ec2sim@127.0.0.1:2222 -i me.pem ec2-user@172.31.0.4
+```
+
+Packer: add the bastion to the `amazon-ebs` source:
+
+```hcl
+  ssh_bastion_host     = "127.0.0.1"
+  ssh_bastion_port     = 2222
+  ssh_bastion_username = "ec2sim"
+  ssh_bastion_password = "ec2sim"
+```
+
+To use a key instead of the password, set `EC2SIM_BASTION_PUBKEY` to your
+public key before starting ec2-sim, then use `ssh_bastion_private_key_file`
+in Packer. The tests take the bastion via `EC2SIM_BASTION=127.0.0.1:2222`
+(`tests/smoke.sh` also needs `sshpass`).
+
+Notes:
+
+- The bastion only listens on `127.0.0.1`. Override detection with
+  `EC2SIM_NETWORK_MODE=routed|bastion`.
+- In bastion mode the metadata service backend listens on `127.0.0.1` and
+  instances reach it through `host.docker.internal`.
+- Apple Silicon builds arm64 base images, and AMIs report `arm64`. Use
+  `architecture = arm64` in AMI filters, or no architecture filter.
+- Tools that run inside a container on the same Docker networks (or with
+  `--network host` in the Docker Desktop VM) can reach instance IPs without the bastion.
+
 ## Base AMIs
 
 | AMI | Image | SSH user |
@@ -69,7 +111,8 @@ Ctrl+C stops the server and removes all instance containers. AMIs you created ar
 | `ami-0ec2511b240400001` | Ubuntu 24.04 (owner `099720109477`) | `ubuntu` |
 | `ami-0ec2511b180400001` | Ubuntu 18.04 **with systemd as PID 1** (owner `099720109477`) | `ubuntu` |
 
-All are EBS-backed, HVM, x86_64, and match the usual name filters
+All are EBS-backed, HVM, use the Docker engine's architecture (`x86_64`, or
+`arm64` on Apple Silicon/ARM hosts), and match the usual name filters
 (`al2023-ami-*`, `ubuntu/images/*`).
 
 **systemd AMIs.** Images labelled `ec2sim.systemd=true`, and every AMI baked
@@ -104,6 +147,8 @@ source "amazon-ebs" "example" {
 ```
 
 Working example: `tests/e2e/al2023-web.pkr.hcl` (`./tests/e2e/run-packer.sh`).
+On Docker Desktop, also add the bastion settings from
+[macOS and Docker Desktop](#macos-and-docker-desktop).
 
 ## Running tools that only talk to real AWS
 
@@ -177,7 +222,8 @@ docker images ec2sim/ami                            # AMIs you've baked
 ./tests/e2e/run-packer.sh   # Packer amazon-ebs build of an nginx AMI
 ```
 
-Both expect a running server on `localhost:4566`.
+Both expect a running server on `localhost:4566`. In bastion mode, run them with
+`EC2SIM_BASTION=127.0.0.1:2222`.
 
 ## Configuration
 
@@ -192,6 +238,10 @@ Both expect a running server on `localhost:4566`.
 | `EC2SIM_PROXY_PORT` | `4567` | HTTPS proxy for real AWS hostnames (0 = off) |
 | `EC2SIM_IMDS_PORT` | `4569` | IMDS backend port on the IMDS network gateway (0 = off) |
 | `EC2SIM_AMI_ALIASES` | – | `ami-id=base-image,...` extra IDs for base AMIs |
+| `EC2SIM_NETWORK_MODE` | `auto` | `routed` (host reaches instance IPs) or `bastion` (Docker Desktop) |
+| `EC2SIM_BASTION_PORT` | `2222` | bastion SSH port on `127.0.0.1` (bastion mode) |
+| `EC2SIM_BASTION_PUBKEY` | – | public key(s) allowed to log in to the bastion as `ec2sim` |
+| `EC2SIM_IMDS_BIND` | `127.0.0.1` | IMDS backend bind address in bastion mode |
 
 Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
 (remove stray instance containers and networks, keep AMIs), `ec2-sim ca-path`.
@@ -208,7 +258,8 @@ Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
 
 - Containers, not VMs: shared host kernel, no custom kernels or kernel modules,
   no Windows AMIs.
-- The public IP is the container's subnet IP (reachable from the Docker host).
+- The public IP is the container's subnet IP: reachable from the host with
+  native Docker/OrbStack, and through the bastion on Docker Desktop.
 - Security groups are recorded but not enforced.
 - AMI tags and EBS volumes/snapshots are metadata only: not restored after a
   restart and not captured by `CreateImage`.

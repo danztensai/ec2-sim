@@ -170,7 +170,7 @@ class ImdsApp:
         if path == "/latest/dynamic/instance-identity/document":
             return Response(json.dumps({
                 "accountId": backend.account_id,
-                "architecture": "x86_64",
+                "architecture": self.vm.arch,
                 "availabilityZone": getattr(inst.placement, "zone", None),
                 "imageId": inst.image_id,
                 "instanceId": inst.id,
@@ -200,8 +200,16 @@ class ImdsApp:
 def start(vm: Any) -> bool:
     if not config.IMDS_PORT or not vm.ensure_imds(config.IMDS_PORT):
         return False
-    server = make_server(config.IMDS_GATEWAY, config.IMDS_PORT, ImdsApp(vm), threaded=True)
+    # Routed engines: bind on the IMDS network's gateway (a host interface).
+    # Docker Desktop: that interface lives inside its VM, so bind locally and let
+    # the proxy container reach us via host.docker.internal.
+    bind = config.IMDS_GATEWAY if vm.network_mode == "routed" else config.IMDS_BIND
+    try:
+        server = make_server(bind, config.IMDS_PORT, ImdsApp(vm), threaded=True)
+    except OSError as e:
+        LOG.warning("IMDS disabled: cannot listen on %s:%s (%s)", bind, config.IMDS_PORT, e)
+        return False
     threading.Thread(target=server.serve_forever, daemon=True, name="imds").start()
     LOG.info("IMDS at http://%s/ inside instances (server %s:%s)",
-             config.IMDS_ADDRESS, config.IMDS_GATEWAY, config.IMDS_PORT)
+             config.IMDS_ADDRESS, bind, config.IMDS_PORT)
     return True

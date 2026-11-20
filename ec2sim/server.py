@@ -85,6 +85,8 @@ def main(argv: list[str] | None = None) -> None:
         atexit.register(vm.cleanup)
         if config.BUILD_BASE_IMAGES:
             threading.Thread(target=vm.build_all_base_images, daemon=True).start()
+        if vm.network_mode == "bastion":
+            vm.ensure_bastion()
         from . import imds
 
         imds.start(vm)

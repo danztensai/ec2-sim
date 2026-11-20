@@ -13,6 +13,18 @@ variable "endpoint" {
   default = "http://localhost:4566"
 }
 
+# Docker Desktop (macOS/Windows): instance IPs aren't reachable from the host,
+# so connect through ec2-sim's SSH bastion. Empty = connect directly.
+variable "bastion_host" {
+  type    = string
+  default = ""
+}
+
+variable "bastion_port" {
+  type    = number
+  default = 2222
+}
+
 source "amazon-ebs" "web" {
   region                      = "us-east-1"
   access_key                  = "test"
@@ -35,6 +47,11 @@ source "amazon-ebs" "web" {
   instance_type = "t3.micro"
   ssh_username  = "ec2-user"
   ssh_interface = "public_ip"
+
+  ssh_bastion_host     = var.bastion_host
+  ssh_bastion_port     = var.bastion_port
+  ssh_bastion_username = "ec2sim"
+  ssh_bastion_password = "ec2sim"
   ami_name      = "web-al2023-{{timestamp}}"
   tags = {
     Builder = "packer"
