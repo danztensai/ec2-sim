@@ -223,3 +223,9 @@ Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
    systemd image, follow `images/ubuntu-18.04` (`ec2sim-boot` entrypoint,
    `ec2sim-userdata.service`, `LABEL ec2sim.systemd="true"`).
 2. Add a `BaseAmi` entry in `ec2sim/catalog.py`.
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). Third-party components (moto,
+Docker SDK, upstream base images, optional test tools) keep their own licenses;
+see [NOTICE](NOTICE). ec2-sim is not affiliated with or endorsed by Amazon Web Services.

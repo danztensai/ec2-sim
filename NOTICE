@@ -1,0 +1,28 @@
+ec2-sim
+Copyright 2026 Danial
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It depends on, but does not redistribute, the following third-party software,
+which is installed separately under its own license:
+
+- moto (https://github.com/getmoto/moto): Apache License 2.0
+  ec2-sim runs moto's server and patches its EC2 models at runtime. The HTTPS
+  proxy uses moto's bundled proxy and its CA certificate from the installed package.
+- Docker SDK for Python (https://github.com/docker/docker-py): Apache License 2.0
+- Werkzeug and Flask (https://palletsprojects.com): BSD 3-Clause License
+- cryptography (https://github.com/pyca/cryptography): Apache License 2.0 or BSD 3-Clause
+
+Base AMI images are built locally from upstream container images, which are
+not included in this repository and are subject to their own licenses:
+
+- Amazon Linux 2023 (public.ecr.aws/amazonlinux/amazonlinux)
+- Ubuntu 18.04 / 24.04 (docker.io/library/ubuntu)
+
+Optional tools used by the tests are not included and are licensed separately,
+e.g. HashiCorp Packer and its Amazon plugin (Business Source License / MPL 2.0)
+and the AWS CLI (Apache License 2.0).
+
+"Amazon Web Services", "AWS", "Amazon EC2" and related marks are trademarks of
+Amazon.com, Inc. or its affiliates. ec2-sim is an independent project and is
+not affiliated with or endorsed by Amazon.

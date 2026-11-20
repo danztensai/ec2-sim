@@ -3,6 +3,8 @@ name = "ec2-sim"
 version = "0.1.0"
 description = "Local EC2 simulator: instances are Docker containers, AMIs are Docker images"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "cryptography>=50.0.2",
     "docker>=7.2.0",
