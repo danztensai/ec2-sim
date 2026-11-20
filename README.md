@@ -7,6 +7,9 @@ and without an AWS account.
 
 Why use it, what it's for, and what it saves: [docs/why-ec2-sim.md](docs/why-ec2-sim.md).
 
+Prefer clicking? The [desktop app](ui/README.md) (Tauri) starts the simulator,
+launches and connects to instances, and bakes AMIs from a GUI.
+
 | EC2 | ec2-sim |
 |---|---|
 | AMI | Docker image (`ec2sim/base-*` or `ec2sim/ami:<ami-id>`) |
