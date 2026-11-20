@@ -1,0 +1,15 @@
+#!/bin/sh
+# Runs EC2 user data once per instance (called by ec2sim-userdata.service).
+set -u
+. /run/ec2sim/env
+MARK="/var/lib/ec2sim/user-data.done.${EC2SIM_INSTANCE_ID:-unknown}"
+[ -z "${EC2SIM_USER_DATA:-}" ] && exit 0
+[ -f "$MARK" ] && exit 0
+touch "$MARK"
+echo "$EC2SIM_USER_DATA" | base64 -d > /var/lib/ec2sim/user-data 2>/dev/null \
+  || echo "$EC2SIM_USER_DATA" > /var/lib/ec2sim/user-data
+if head -c 2 /var/lib/ec2sim/user-data | grep -q '#!'; then
+  chmod +x /var/lib/ec2sim/user-data
+  /var/lib/ec2sim/user-data >> /var/log/cloud-init-output.log 2>&1
+  echo "user-data exit=$?" >> /var/log/cloud-init-output.log
+fi

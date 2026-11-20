@@ -1,0 +1,12 @@
+[Unit]
+Description=ec2-sim: run EC2 user data (cloud-init stand-in)
+After=network-online.target ssh.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ec2sim-userdata
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
