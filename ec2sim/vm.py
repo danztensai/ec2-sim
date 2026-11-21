@@ -31,6 +31,8 @@ class DockerVMManager:
     def __init__(self) -> None:
         self.client = docker.from_env()
         self.client.ping()
+        # Commits/builds of large instances can take minutes: no 60 s client timeout.
+        self.slow_client = docker.from_env(timeout=None)
         self._build_lock = threading.Lock()
         self._net_lock = threading.Lock()
         self._built: set[str] = set()
@@ -373,7 +375,8 @@ class DockerVMManager:
         # Drop the source instance's labels so the image isn't mistaken for an instance.
         for key in ("instance_id",):
             all_labels.setdefault(_label(key), "")
-        c.commit(
+        self.slow_client.api.commit(
+            c.id,
             repository=config.AMI_REPO,
             tag=ami_id,
             message=f"CreateImage({instance_id}) -> {ami_id}",
@@ -387,12 +390,12 @@ class DockerVMManager:
             self.client.images.get(source_ref)
         except ImageNotFound:
             LOG.info("pulling %s", source_ref)
-            self.client.images.pull(source_ref)
+            self.slow_client.images.pull(source_ref)
         lines = [f"FROM {source_ref}"]
         all_labels = {**{_label(k): v for k, v in labels.items()}, _label("ami_id"): ami_id}
         lines += [f"LABEL {json.dumps(k)}={json.dumps(v)}" for k, v in all_labels.items()]
         ref = f"{config.AMI_REPO}:{ami_id}"
-        self.client.images.build(fileobj=io.BytesIO("\n".join(lines).encode()), tag=ref, rm=True)
+        self.slow_client.images.build(fileobj=io.BytesIO("\n".join(lines).encode()), tag=ref, rm=True)
         return ref
 
     def remove_ami_image(self, ami_id: str) -> None:

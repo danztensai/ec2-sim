@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import threading
+import time
 import logging
 from datetime import datetime
 from typing import Any
@@ -154,18 +156,27 @@ def apply(vm: DockerVMManager | None) -> None:
         ami.root_device_type = "ebs"
         ami.architecture = _arch()
         if VM is not None and VM.has_instance(instance_id):
+            # Like AWS: return at once as "pending"; snapshot in the background.
+            # Large instances take minutes to commit; clients poll DescribeImages.
             ami.state = "pending"
-            try:
-                ref = VM.commit_instance(
-                    instance_id, ami.id, _ami_labels(self, ami, source_instance=instance_id)
-                )
-                ami.ec2sim_image = ref  # type: ignore[attr-defined]
-                ami.image_location = f"docker:{ref}"
-                ami.state = "available"
-                LOG.info("CreateImage %s -> %s (%s)", instance_id, ami.id, ref)
-            except Exception:  # noqa: BLE001
-                LOG.exception("commit of %s failed", instance_id)
-                ami.state = "failed"
+            labels = _ami_labels(self, ami, source_instance=instance_id)
+
+            def bake() -> None:
+                started = time.monotonic()
+                LOG.info("CreateImage %s -> %s: snapshotting (large instances take minutes)…",
+                         instance_id, ami.id)
+                try:
+                    ref = VM.commit_instance(instance_id, ami.id, labels)  # type: ignore[union-attr]
+                    ami.ec2sim_image = ref  # type: ignore[attr-defined]
+                    ami.image_location = f"docker:{ref}"
+                    ami.state = "available"
+                    LOG.info("CreateImage %s -> %s available after %.0fs (%s)",
+                             instance_id, ami.id, time.monotonic() - started, ref)
+                except Exception:  # noqa: BLE001
+                    LOG.exception("CreateImage %s -> %s failed", instance_id, ami.id)
+                    ami.state = "failed"
+
+            threading.Thread(target=bake, daemon=True, name=f"bake-{ami.id}").start()
         return ami
 
     @_wrap(AmiBackend, "copy_image")
@@ -219,8 +230,6 @@ def apply(vm: DockerVMManager | None) -> None:
     # ---------------------------------------------------------- custom IDs
     # Tag `_custom_id_` on CreateSecurityGroup picks the group ID, so scripts
     # that hard-code real IDs (e.g. sg-138d3374) find their group.
-    import threading
-
     import moto.ec2.models.security_groups as sg_module
     from moto.ec2.models.security_groups import SecurityGroupBackend
 
