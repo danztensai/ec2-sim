@@ -62,11 +62,13 @@ pub fn cmd(program: &str) -> Command {
     let mut c = match runtime() {
         Runtime::Native => Command::new(program),
         Runtime::Wsl { distro } => {
+            // `-e` runs the program directly with exactly these arguments.
+            // (`--` would hand the joined command line to bash to re-parse.)
             let mut c = Command::new("wsl.exe");
             if let Some(d) = distro {
                 c.args(["-d", &d]);
             }
-            c.args(["--", program]);
+            c.args(["-e", program]);
             c
         }
     };
@@ -81,12 +83,12 @@ pub fn sh(script: &str) -> Command {
     c
 }
 
-/// Prefix for commands the user runs in a terminal ("" natively, "wsl.exe -- " on Windows+WSL).
+/// Prefix for commands the user runs in a terminal ("" natively, "wsl.exe -e " on Windows+WSL).
 fn user_prefix() -> String {
     match runtime() {
         Runtime::Native => String::new(),
-        Runtime::Wsl { distro: Some(d) } => format!("wsl.exe -d {d} -- "),
-        Runtime::Wsl { distro: None } => "wsl.exe -- ".into(),
+        Runtime::Wsl { distro: Some(d) } => format!("wsl.exe -d {d} -e "),
+        Runtime::Wsl { distro: None } => "wsl.exe -e ".into(),
     }
 }
 
@@ -185,7 +187,12 @@ pub fn ssh_command(ip: &str, user: &str, key_name: &str, bastion: bool) -> Resul
     parts.push("-o".into());
     parts.push("StrictHostKeyChecking=no".into());
     parts.push(format!("{user}@{ip}"));
-    Ok(format!("{}{}", user_prefix(), parts.join(" ")))
+    let ssh = parts.join(" ");
+    Ok(match runtime() {
+        Runtime::Native => ssh,
+        // Through sh so `~/.ec2-sim/keys/...` expands inside WSL.
+        Runtime::Wsl { .. } => format!("{}sh -c \"{ssh}\"", user_prefix()),
+    })
 }
 
 /// Open a terminal window running `command` (best effort per OS).
@@ -201,12 +208,18 @@ pub fn open_terminal(command: &str) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Windows Terminal if installed, else a classic console window.
-        if Command::new("wt.exe").args(["new-tab", "cmd", "/K", command]).spawn().is_ok() {
-            return Ok(());
-        }
-        return Command::new("cmd").args(["/C", "start", "ec2-sim", "cmd", "/K", command]).spawn()
-            .map(|_| ()).map_err(|e| e.to_string());
+        // `cmd /K <command>` in a new console (Windows 11 hosts it in Windows
+        // Terminal when that's the default). The command line is passed
+        // verbatim: cmd doesn't understand the \" escaping Rust would apply to
+        // the quotes inside commands like `sh -c "a || b"`.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        return Command::new("cmd.exe")
+            .raw_arg(format!("/K {command}"))
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("could not open a terminal: {e}"));
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -336,5 +349,39 @@ pub fn delete_key_file(name: &str) -> Result<(), String> {
             Ok(())
         }
         Runtime::Wsl { .. } => run(&mut sh(&format!("rm -f \"$HOME/.ec2-sim/keys/{name}.pem\""))).map(|_| ()),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// Opens a real console window and checks the command ran inside WSL with
+    /// its quotes and `||` intact. Run on Windows: cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn terminal_command_runs_in_wsl() {
+        configure("wsl", "");
+        let marker = "/tmp/ec2sim-ui-terminal-test";
+        let _ = sh(&format!("rm -f {marker}")).status();
+        // Quoting-sensitive: if the quotes were lost, `sh -c echo` would print an
+        // empty line and the marker would not contain "a b|ok".
+        let cmd = format!("{}sh -c \"false || echo 'a b'\\|ok > {marker}\" & exit", user_prefix());
+        open_terminal(&cmd).expect("open terminal");
+        let ok = (0..40).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            sh(&format!("grep -qxF 'a b|ok' {marker}")).status().map(|s| s.success()).unwrap_or(false)
+        });
+        let _ = sh(&format!("rm -f {marker}")).status();
+        assert!(ok, "command did not run inside WSL via the terminal");
+    }
+
+    /// sh() passes the script to WSL byte-for-byte (quotes, $, ;, |).
+    #[test]
+    #[ignore]
+    fn sh_script_is_passed_verbatim() {
+        configure("wsl", "");
+        let out = sh(r#"x='a "b" $c'; printf '%s|%s\n' "$x" "$(echo ok)""#).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "a \"b\" $c|ok\n");
     }
 }
