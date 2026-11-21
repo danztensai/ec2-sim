@@ -48,6 +48,15 @@ BASE_AMIS: list[BaseAmi] = [
         image_dir="ubuntu-18.04",
         default_user="ubuntu",
     ),
+    BaseAmi(
+        ami_id="ami-0ec2511b260400001",
+        name="ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-ec2sim",
+        description="Canonical, Ubuntu, 26.04 LTS with systemd (ec2-sim container AMI)",
+        owner_id="099720109477",
+        owner_alias="",
+        image_dir="ubuntu-26.04",
+        default_user="ubuntu",
+    ),
 ]
 
 

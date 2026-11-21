@@ -113,6 +113,7 @@ Notes:
 | `ami-0ec2511a120230001` | Amazon Linux 2023 (owner `amazon`) | `ec2-user` |
 | `ami-0ec2511b240400001` | Ubuntu 24.04 (owner `099720109477`) | `ubuntu` |
 | `ami-0ec2511b180400001` | Ubuntu 18.04 **with systemd as PID 1** (owner `099720109477`) | `ubuntu` |
+| `ami-0ec2511b260400001` | Ubuntu 26.04 **with systemd as PID 1** (owner `099720109477`) | `ubuntu` |
 
 All are EBS-backed, HVM, use the Docker engine's architecture (`x86_64`, or
 `arm64` on Apple Silicon/ARM hosts), and match the usual name filters
