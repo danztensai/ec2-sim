@@ -7,6 +7,9 @@ export type Status = {
   docker: boolean;
   network_mode: "routed" | "bastion";
   keys_dir: string;
+  platform: "linux" | "macos" | "windows" | string;
+  /** Running on Windows and driving ec2-sim inside WSL. */
+  via_wsl: boolean;
 };
 
 export type Settings = {
@@ -15,6 +18,8 @@ export type Settings = {
   region: string;
   auto_start: boolean;
   extra_env: string;
+  backend: "auto" | "wsl" | "native" | string;
+  wsl_distro: string;
 };
 
 export type InstanceState = "pending" | "running" | "stopping" | "stopped" | "shutting-down" | "terminated";
@@ -62,6 +67,8 @@ export const api = {
   ec2: (action: string, params: Params = {}) => invoke<Json>("ec2", { action, params }),
   consoleOutput: (instanceId: string) => invoke<string>("console_output", { instanceId }),
   shellCommand: (instanceId: string) => invoke<string>("shell_command", { instanceId }),
+  sshCommand: (ip: string, user: string, keyName: string, bastion: boolean) =>
+    invoke<string>("ssh_command", { ip, user, keyName, bastion }),
   openTerminal: (command: string) => invoke<void>("open_terminal", { command }),
   saveKey: (name: string, material: string) => invoke<string>("save_key", { name, material }),
   keyPath: (name: string) => invoke<string | null>("key_path", { name }),

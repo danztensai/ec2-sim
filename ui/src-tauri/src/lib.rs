@@ -27,6 +27,10 @@ struct Status {
     /// "routed" or "bastion" (Docker Desktop: SSH via 127.0.0.1:2222).
     network_mode: String,
     keys_dir: String,
+    /// "linux" | "macos" | "windows"
+    platform: String,
+    /// The app runs on Windows and drives ec2-sim inside WSL.
+    via_wsl: bool,
 }
 
 #[tauri::command]
@@ -44,7 +48,9 @@ async fn status(state: State<'_, AppState>) -> Result<Status, String> {
         managed,
         docker,
         network_mode,
-        keys_dir: host::keys_dir().to_string_lossy().into_owned(),
+        keys_dir: host::keys_dir(),
+        platform: std::env::consts::OS.into(),
+        via_wsl: matches!(host::runtime(), host::Runtime::Wsl { .. }),
     })
 }
 
@@ -89,8 +95,9 @@ fn get_settings(state: State<'_, AppState>) -> settings::Settings {
 }
 
 #[tauri::command]
-fn save_settings(state: State<'_, AppState>, new: settings::Settings) -> Result<(), String> {
+async fn save_settings(state: State<'_, AppState>, new: settings::Settings) -> Result<(), String> {
     settings::save(&new)?;
+    host::configure(&new.backend, &new.wsl_distro);
     *state.settings.lock().unwrap() = new;
     Ok(())
 }
@@ -121,6 +128,13 @@ fn shell_command(instance_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn ssh_command(ip: String, user: String, key_name: String, bastion: bool) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || host::ssh_command(&ip, &user, &key_name, bastion))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn open_terminal(command: String) -> Result<(), String> {
     // Waits briefly to detect terminals that crash on start: keep it off the UI thread.
     tauri::async_runtime::spawn_blocking(move || host::open_terminal(&command))
@@ -135,7 +149,7 @@ async fn save_key(name: String, material: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn key_path(name: String) -> Option<String> {
-    host::key_path(&name)
+    tauri::async_runtime::spawn_blocking(move || host::key_path(&name)).await.ok().flatten()
 }
 
 #[tauri::command]
@@ -145,11 +159,13 @@ async fn delete_key_file(name: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let initial = settings::load();
+    host::configure(&initial.backend, &initial.wsl_distro);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             server: Mutex::new(server::Server::default()),
-            settings: Mutex::new(settings::load()),
+            settings: Mutex::new(initial),
         })
         .invoke_handler(tauri::generate_handler![
             status,
@@ -161,6 +177,7 @@ pub fn run() {
             ec2,
             console_output,
             shell_command,
+            ssh_command,
             open_terminal,
             save_key,
             key_path,

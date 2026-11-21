@@ -50,9 +50,33 @@ npm run tauri build      # release build + installers in src-tauri/target/releas
 The app looks for ec2-sim in the repository it was built from (`ui/..`). Change
 it under **Settings → ec2-sim folder** if you move things.
 
+### Windows with ec2-sim in WSL (recommended on Windows)
+
+Run the app natively on Windows (WebView2, smooth) while ec2-sim and Docker stay in WSL:
+
+- The app reaches the API on `localhost:4566` through WSL's localhost forwarding.
+- It starts and stops ec2-sim with `wsl.exe` (clean SIGTERM shutdown).
+- Console output and the Docker helpers run inside WSL.
+- **Shell** and **SSH** commands are `wsl.exe -- …`, because instance IPs are only
+  reachable inside WSL.
+- Key files go to WSL's `~/.ec2-sim/keys`.
+- Detection is automatic: Docker Desktop on Windows means native mode, otherwise WSL.
+  Override it, pick a distro, and set the folder (a WSL path such as
+  `~/tools/ec2-sim`) under **Settings**.
+
+Build it on Windows with Rust (MSVC toolchain + Visual Studio Build Tools, C++
+workload) and Node.js 20.19+, from a copy of `ui/` on the Windows disk (building
+on `\\wsl.localhost\...` is slow):
+
+```powershell
+$env:EC2SIM_DEFAULT_DIR = "/home/<you>/tools/ec2-sim"   # optional: default WSL folder
+npm ci
+npm run tauri build      # -> src-tauri\target\release\ec2-sim-ui.exe + installers in bundle\
+```
+
 Notes:
 
-- **WSL2:** the window opens through WSLg. Run it with
+- **WSL2 (Linux build through WSLg):** prefer the Windows build above. If you run the Linux build, the window opens through WSLg. Run it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` (otherwise it may render blank). Leave it in
   the default Wayland mode: forcing X11 (`GDK_BACKEND=x11`) makes input laggy and
   the first click only focuses the window. If it still feels slow, also set

@@ -1,5 +1,5 @@
 // Dialogs for one instance: Connect, Console output, Create AMI.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, RefreshCw, SquareTerminal } from "lucide-react";
 import { api, createImage, defaultUser, Instance, instanceAction } from "../api";
 import { useStore } from "../store";
@@ -19,13 +19,12 @@ export function ConnectDialog({ instance, onClose }: { instance: Instance; onClo
   }, [instance.id]);
 
   const ip = instance.publicIp || instance.privateIp;
-  const sshCmd = useMemo(() => {
-    const parts = ["ssh"];
-    if (keyPath) parts.push("-i", JSON.stringify(keyPath));
-    if (bastion) parts.push("-J", "ec2sim@127.0.0.1:2222");
-    parts.push("-o", "StrictHostKeyChecking=no", `${user}@${ip}`);
-    return parts.join(" ");
-  }, [keyPath, bastion, user, ip]);
+  // Built in Rust so it fits where the terminal runs (e.g. `wsl.exe -- ssh ...` on Windows).
+  const [sshCmd, setSshCmd] = useState("");
+  useEffect(() => {
+    if (!ip) return;
+    api.sshCommand(ip, user, instance.keyName, bastion).then(setSshCmd).catch(() => setSshCmd(""));
+  }, [ip, user, instance.keyName, bastion]);
 
   const open = async (cmd: string) => {
     try {
@@ -47,7 +46,10 @@ export function ConnectDialog({ instance, onClose }: { instance: Instance; onClo
       </div>
       {tab === "shell" ? (
         <div className="stack">
-          <p className="muted">Opens a root shell inside the instance with <code>docker exec</code>. Fastest way in; no key pair or network needed.</p>
+          <p className="muted">
+            Opens a root shell inside the instance with <code>docker exec</code>. Fastest way in; no key pair or network needed.
+            {status?.via_wsl && " Runs through WSL, where ec2-sim and Docker live."}
+          </p>
           {shellCmd && <CopyField value={shellCmd} label="Command" />}
           <div>
             <Button variant="primary" icon={<SquareTerminal size={16} />} onClick={() => open(shellCmd)} disabled={!shellCmd}>
@@ -74,9 +76,10 @@ export function ConnectDialog({ instance, onClose }: { instance: Instance; onClo
               <option>root</option>
             </select>
           </Field>
-          <CopyField value={sshCmd} label="Command" />
+          {sshCmd && <CopyField value={sshCmd} label="Command" />}
+          {status?.via_wsl && <p className="muted small">Instance IPs are only reachable inside WSL, so SSH runs there (keys are in WSL's ~/.ec2-sim/keys).</p>}
           <div>
-            <Button variant="primary" icon={<SquareTerminal size={16} />} onClick={() => open(sshCmd)} disabled={!ip}>
+            <Button variant="primary" icon={<SquareTerminal size={16} />} onClick={() => open(sshCmd)} disabled={!ip || !sshCmd}>
               Open in terminal
             </Button>
           </div>

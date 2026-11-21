@@ -27,6 +27,20 @@ fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, app: &AppHandle, line: String) 
     let _ = app.emit("server-log", line);
 }
 
+use crate::host;
+
+/// PID of the ec2-sim process the app started inside WSL.
+const WSL_PID_FILE: &str = "/tmp/ec2sim-ui-server.pid";
+
+/// A path inside WSL for sh: `~/x` -> `"$HOME"/'x'`, otherwise single-quoted.
+fn wsl_dir(dir: &str) -> String {
+    match dir.strip_prefix("~/") {
+        Some(rest) => format!("\"$HOME\"/{}", host::sh_quote(rest)),
+        None if dir == "~" => "\"$HOME\"".into(),
+        None => host::sh_quote(dir),
+    }
+}
+
 /// Program + args to launch ec2-sim from its checkout.
 fn command_for(dir: &Path) -> Command {
     #[cfg(windows)]
@@ -60,19 +74,40 @@ impl Server {
         if self.is_managed() {
             return Ok(());
         }
-        let dir_path = Path::new(dir);
-        if !dir_path.join("pyproject.toml").exists() {
-            return Err(format!(
-                "'{dir}' doesn't look like an ec2-sim folder (no pyproject.toml). Set it in Settings."
-            ));
-        }
-        let mut cmd = command_for(dir_path);
-        cmd.current_dir(dir_path)
-            .envs(env)
-            .env("PYTHONUNBUFFERED", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut cmd = match host::runtime() {
+            host::Runtime::Native => {
+                let dir_path = Path::new(dir);
+                if !dir_path.join("pyproject.toml").exists() {
+                    return Err(format!(
+                        "'{dir}' doesn't look like an ec2-sim folder (no pyproject.toml). Set it in Settings."
+                    ));
+                }
+                let mut c = command_for(dir_path);
+                c.current_dir(dir_path).envs(env).env("PYTHONUNBUFFERED", "1");
+                host::hide_window(&mut c);
+                c
+            }
+            host::Runtime::Wsl { .. } => {
+                // Inside WSL: record the shell's PID, then `exec` so that PID becomes ec2-sim.
+                let d = wsl_dir(dir);
+                let ok = host::sh(&format!("test -f {d}/pyproject.toml")).status().map(|s| s.success()).unwrap_or(false);
+                if !ok {
+                    return Err(format!(
+                        "'{dir}' (inside WSL) doesn't look like an ec2-sim folder (no pyproject.toml). Set it in Settings."
+                    ));
+                }
+                let envs: String = env
+                    .iter()
+                    .filter(|(k, _)| k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                    .map(|(k, v)| format!("{k}={} ", host::sh_quote(v)))
+                    .collect();
+                host::sh(&format!(
+                    "cd {d} && echo $$ > {WSL_PID_FILE} && export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\" && \
+                     exec env {envs}PYTHONUNBUFFERED=1 sh -c 'if [ -x .venv/bin/ec2-sim ]; then exec .venv/bin/ec2-sim; else exec uv run ec2-sim; fi'"
+                ))
+            }
+        };
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("could not start ec2-sim ({e}). Is uv installed and on PATH?"))?;
@@ -101,12 +136,20 @@ impl Server {
         let Some(mut child) = self.child.take() else {
             return Ok(());
         };
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(child.id() as i32, libc::SIGTERM);
+        match host::runtime() {
+            // SIGTERM lets ec2-sim remove its containers before exiting.
+            host::Runtime::Wsl { .. } => {
+                let _ = host::sh(&format!("kill -TERM \"$(cat {WSL_PID_FILE})\" 2>/dev/null; rm -f {WSL_PID_FILE}")).status();
+            }
+            host::Runtime::Native => {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGTERM);
+                }
+                #[cfg(not(unix))]
+                let _ = child.kill();
+            }
         }
-        #[cfg(not(unix))]
-        let _ = child.kill();
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             match child.try_wait() {

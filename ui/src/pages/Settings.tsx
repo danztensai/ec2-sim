@@ -15,13 +15,43 @@ export default function SettingsPage() {
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setForm({ ...form, [k]: v });
   const dirty = JSON.stringify(form) !== JSON.stringify(settings);
-  const serverSide = settings && (form.ec2sim_dir !== settings.ec2sim_dir || form.extra_env !== settings.extra_env);
+  const serverSide =
+    settings &&
+    (form.ec2sim_dir !== settings.ec2sim_dir || form.extra_env !== settings.extra_env || form.backend !== settings.backend || form.wsl_distro !== settings.wsl_distro);
 
   return (
     <div className="page narrow">
       <section className="card stack">
         <h2>Simulator</h2>
-        <Field label="ec2-sim folder" hint="The ec2-sim checkout this app starts (the folder with pyproject.toml).">
+        {status?.platform === "windows" && (
+          <Field
+            label="Run ec2-sim in"
+            hint={
+              status.via_wsl
+                ? "Currently using WSL: the server, Docker commands, shells and SSH run inside WSL."
+                : "Currently running natively (Docker Desktop on Windows)."
+            }
+          >
+            <select value={form.backend} onChange={(e) => set("backend", e.target.value)}>
+              <option value="auto">Automatic (Docker Desktop if available, else WSL)</option>
+              <option value="wsl">WSL</option>
+              <option value="native">Windows (Docker Desktop)</option>
+            </select>
+          </Field>
+        )}
+        {status?.platform === "windows" && form.backend !== "native" && (
+          <Field label="WSL distro" hint="Leave empty for your default distro (wsl -l -v lists them).">
+            <input value={form.wsl_distro} onChange={(e) => set("wsl_distro", e.target.value)} placeholder="default" spellCheck={false} />
+          </Field>
+        )}
+        <Field
+          label="ec2-sim folder"
+          hint={
+            status?.via_wsl
+              ? "Path inside WSL, e.g. ~/tools/ec2-sim (the folder with pyproject.toml)."
+              : "The ec2-sim checkout this app starts (the folder with pyproject.toml)."
+          }
+        >
           <input value={form.ec2sim_dir} onChange={(e) => set("ec2sim_dir", e.target.value)} spellCheck={false} />
         </Field>
         <Field label="API endpoint">

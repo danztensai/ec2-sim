@@ -16,6 +16,10 @@ pub struct Settings {
     pub auto_start: bool,
     /// Extra environment for the server, one KEY=VALUE per line.
     pub extra_env: String,
+    /// Windows only: where ec2-sim runs. "auto" | "wsl" | "native".
+    pub backend: String,
+    /// Windows only: WSL distro name ("" = default distro).
+    pub wsl_distro: String,
 }
 
 impl Default for Settings {
@@ -26,12 +30,22 @@ impl Default for Settings {
             region: "us-east-1".into(),
             auto_start: true,
             extra_env: String::new(),
+            backend: "auto".into(),
+            wsl_distro: String::new(),
         }
     }
 }
 
-/// The repo this UI was built from (ui/src-tauri/../..), else ~/tools/ec2-sim.
+/// EC2SIM_DEFAULT_DIR at build time, else the repo this UI was built from
+/// (ui/src-tauri/../..), else ~/tools/ec2-sim.
 fn default_ec2sim_dir() -> String {
+    if let Some(d) = option_env!("EC2SIM_DEFAULT_DIR") {
+        return d.to_string();
+    }
+    if cfg!(windows) {
+        // On Windows ec2-sim usually lives in WSL; `~` is expanded there.
+        return "~/tools/ec2-sim".into();
+    }
     let built_from = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     if built_from.join("pyproject.toml").exists() {
         if let Ok(p) = built_from.canonicalize() {
