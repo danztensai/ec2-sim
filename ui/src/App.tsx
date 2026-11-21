@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Disc3, Gauge, KeyRound, Power, ScrollText, Server, Settings as SettingsIcon } from "lucide-react";
+import { Disc3, Gauge, KeyRound, Power, ScrollText, Server, Settings as SettingsIcon, TerminalSquare } from "lucide-react";
 import { StoreProvider, useStore } from "./store";
 import { Button, ToastProvider, useAction } from "./ui";
 import Overview from "./pages/Overview";
@@ -8,15 +8,17 @@ import Images from "./pages/Images";
 import KeyPairs from "./pages/KeyPairs";
 import Logs from "./pages/Logs";
 import SettingsPage from "./pages/Settings";
+import RunScript from "./pages/RunScript";
 import { LaunchProvider } from "./pages/Launch";
 
-export type Page = "overview" | "instances" | "images" | "keys" | "logs" | "settings";
+export type Page = "overview" | "instances" | "images" | "keys" | "run" | "logs" | "settings";
 
 const NAV: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <Gauge size={18} /> },
   { id: "instances", label: "Instances", icon: <Server size={18} /> },
   { id: "images", label: "AMIs", icon: <Disc3 size={18} /> },
   { id: "keys", label: "Key pairs", icon: <KeyRound size={18} /> },
+  { id: "run", label: "Run script", icon: <TerminalSquare size={18} /> },
   { id: "logs", label: "Server log", icon: <ScrollText size={18} /> },
   { id: "settings", label: "Settings", icon: <SettingsIcon size={18} /> },
 ];
@@ -101,6 +103,7 @@ function Shell() {
           {page === "instances" && <Instances />}
           {page === "images" && <Images go={setPage} />}
           {page === "keys" && <KeyPairs />}
+          {page === "run" && <RunScript />}
           {page === "logs" && <Logs />}
           {page === "settings" && <SettingsPage />}
         </div>

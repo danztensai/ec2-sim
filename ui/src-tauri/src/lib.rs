@@ -3,6 +3,7 @@
 
 mod ec2;
 mod host;
+mod runner;
 mod server;
 mod settings;
 
@@ -15,6 +16,7 @@ use tauri::{Manager, State};
 struct AppState {
     server: Mutex<server::Server>,
     settings: Mutex<settings::Settings>,
+    runner: Mutex<runner::Runner>,
 }
 
 #[derive(Serialize)]
@@ -157,6 +159,40 @@ async fn delete_key_file(name: String) -> Result<(), String> {
     host::delete_key_file(&name)
 }
 
+/// Run a project's own command against ec2-sim (`ec2-sim run`), streaming
+/// "run-output" lines and a final "run-exit" code.
+#[tauri::command]
+async fn run_script(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dir: String,
+    command: String,
+    region: String,
+    env: Vec<(String, String)>,
+) -> Result<(), String> {
+    let ec2sim_dir = state.settings.lock().unwrap().ec2sim_dir.clone();
+    state.runner.lock().unwrap().start(&app, &ec2sim_dir, &dir, &command, &region, env)
+}
+
+#[tauri::command]
+async fn stop_script(state: State<'_, AppState>) -> Result<(), String> {
+    let ec2sim_dir = state.settings.lock().unwrap().ec2sim_dir.clone();
+    let mut r = std::mem::take(&mut *state.runner.lock().unwrap());
+    let r = tauri::async_runtime::spawn_blocking(move || {
+        r.stop(&ec2sim_dir);
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    *state.runner.lock().unwrap() = r;
+    Ok(())
+}
+
+#[tauri::command]
+fn script_running(state: State<'_, AppState>) -> bool {
+    state.runner.lock().unwrap().is_running()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = settings::load();
@@ -166,6 +202,7 @@ pub fn run() {
         .manage(AppState {
             server: Mutex::new(server::Server::default()),
             settings: Mutex::new(initial),
+            runner: Mutex::new(runner::Runner::default()),
         })
         .invoke_handler(tauri::generate_handler![
             status,
@@ -182,6 +219,9 @@ pub fn run() {
             save_key,
             key_path,
             delete_key_file,
+            run_script,
+            stop_script,
+            script_running,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the ec2-sim UI")
@@ -189,6 +229,13 @@ pub fn run() {
             // Stop a server the UI started, so its containers are cleaned up.
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
+                let dir = state.settings.lock().unwrap().ec2sim_dir.clone();
+                {
+                    let mut r = state.runner.lock().unwrap();
+                    if r.is_running() {
+                        r.stop(&dir);
+                    }
+                }
                 let mut srv = state.server.lock().unwrap();
                 if srv.is_managed() {
                     let _ = srv.stop(app);

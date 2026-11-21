@@ -32,13 +32,8 @@ use crate::host;
 /// PID of the ec2-sim process the app started inside WSL.
 const WSL_PID_FILE: &str = "/tmp/ec2sim-ui-server.pid";
 
-/// A path inside WSL for sh: `~/x` -> `"$HOME"/'x'`, otherwise single-quoted.
 fn wsl_dir(dir: &str) -> String {
-    match dir.strip_prefix("~/") {
-        Some(rest) => format!("\"$HOME\"/{}", host::sh_quote(rest)),
-        None if dir == "~" => "\"$HOME\"".into(),
-        None => host::sh_quote(dir),
-    }
+    host::wsl_path(dir)
 }
 
 /// Program + args to launch ec2-sim from its checkout.

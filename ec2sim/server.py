@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import os
 import logging
 import signal
 import sys
@@ -52,6 +53,18 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("build-images", help="build the base AMI Docker images and exit")
     sub.add_parser("cleanup", help="remove instance containers and networks, keep AMIs")
     sub.add_parser("ca-path", help="print the CA certificate path for the HTTPS proxy")
+    run_p = sub.add_parser(
+        "run",
+        help="run a project's own command (e.g. a Packer build script) against ec2-sim",
+        description="Run COMMAND unmodified in WORKDIR inside a runner container: AWS calls go to "
+                    "ec2-sim via its HTTPS proxy, only fake AWS credentials exist.",
+    )
+    run_p.add_argument("--workdir", "-C", default=".", help="folder to run in (mounted at the same path)")
+    run_p.add_argument("--region", default=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    run_p.add_argument("-e", "--env", action="append", default=[], metavar="NAME[=VALUE]",
+                       help="pass a variable; NAME alone takes the value from your environment")
+    run_p.add_argument("command", nargs=argparse.REMAINDER, help="-- COMMAND [ARGS…]")
+    sub.add_parser("stop-runs", help="stop all running `ec2-sim run` commands")
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
     args = parser.parse_args(argv)
@@ -61,6 +74,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
+    if args.cmd == "run":
+        from . import run as run_mod
+
+        command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        sys.exit(run_mod.run(args.workdir, command, args.env, args.region))
+    if args.cmd == "stop-runs":
+        from . import run as run_mod
+
+        sys.exit(run_mod.stop_all())
     if args.cmd == "ca-path":
         from moto.moto_proxy.proxy3 import CertificateCreator
 

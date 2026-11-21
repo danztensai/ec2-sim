@@ -278,3 +278,13 @@ td > .copy-text { color: var(--text); }
   .flow-steps { grid-template-columns: 1fr; }
   .flow-arrow { display: none; }
 }
+
+/* ---------- run script ---------- */
+.grid-run { display: grid; grid-template-columns: 1fr 200px; gap: 14px; }
+.stack-sm { display: flex; flex-direction: column; gap: 8px; }
+.mono-input { font-family: var(--mono); font-size: 13px; }
+.var-row { display: grid; grid-template-columns: 220px 1fr auto auto auto; gap: 8px; align-items: center; }
+.var-value input { padding-left: 30px; }
+.var-row .input-icon svg { left: 10px; }
+.run-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.page-fill .logbox { min-height: 260px; }

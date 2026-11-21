@@ -190,6 +190,26 @@ To rehearse an existing AMI build or rollout script locally:
 Provisioning runs for real inside the instances, so packages are downloaded
 from wherever your scripts point.
 
+## Running your own scripts: `ec2-sim run`
+
+Run a project's own build/deploy command, **unmodified**, against ec2-sim:
+
+```bash
+export VAULT_TOKEN=...            # any variables your script needs
+uv run ec2-sim run -C /path/to/repo --region us-west-2 -e VAULT_TOKEN -- './build-ami.sh --env staging'
+```
+
+The command runs in a disposable runner container (`images/runner`: Packer +
+Amazon plugin, AWS CLI v2, jq, sudo, `tempfile`) with:
+
+- the folder mounted **at the same path** (relative paths and log files behave as on a build host)
+- AWS calls routed to ec2-sim through its HTTPS proxy, with the CA trusted: no endpoint changes needed
+- **only fake AWS credentials** (your real ones are never passed in), on the host network for SSH to instances
+- variables passed by name (`-e NAME` takes the value from your environment), so secrets stay off command lines
+
+`ec2-sim stop-runs` stops running commands. The desktop app's **Run script** page does the same from the GUI.
+Scripts must have LF line endings: on Windows, run them from a checkout inside WSL.
+
 ## Custom resource IDs
 
 Tag `_custom_id_` on `CreateSecurityGroup` to choose the group ID:

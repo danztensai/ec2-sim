@@ -92,6 +92,15 @@ fn user_prefix() -> String {
     }
 }
 
+/// A path inside WSL for sh: `~/x` -> `"$HOME"/'x'`, otherwise single-quoted.
+pub fn wsl_path(dir: &str) -> String {
+    match dir.strip_prefix("~/") {
+        Some(rest) => format!("\"$HOME\"/{}", sh_quote(rest)),
+        None if dir == "~" => "\"$HOME\"".into(),
+        None => sh_quote(dir),
+    }
+}
+
 /// Single-quote for POSIX sh.
 pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
