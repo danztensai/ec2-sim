@@ -210,6 +210,28 @@ Amazon plugin, AWS CLI v2, jq, sudo, `tempfile`) with:
 `ec2-sim stop-runs` stops running commands. The desktop app's **Run script** page does the same from the GUI.
 Scripts must have LF line endings: on Windows, run them from a checkout inside WSL.
 
+## Networking: instance ↔ instance and host → instance
+
+- **Inside a VPC** all instances share one Docker network (the VPC's CIDR), so
+  they reach each other across subnets/AZs, as in AWS. IPs are still allocated
+  in each subnet's range; `--private-ip-address` is honoured. Instances resolve
+  each other by **instance ID**, **Name tag**, and **private DNS name**
+  (`ip-10-0-1-4.<region>.compute.internal`, `…ec2.internal` in us-east-1).
+  Different VPCs stay isolated.
+- **From your computer** (any OS) use a port forward:
+
+  ```bash
+  uv run ec2-sim forward i-0abc… 5432 --local 15432   # localhost:15432 -> instance:5432
+  uv run ec2-sim forwards                              # list
+  uv run ec2-sim unforward ec2sim-fwd-…                # remove (or --all)
+  ```
+
+  Docker publishes it on the host's localhost: on WSL it's also reachable from
+  Windows, on Docker Desktop from macOS/Windows. Forwards are removed when the
+  instance is terminated or the server stops. In the desktop app:
+  **Instances → ⋯ → Port forward…**.
+- On Linux/WSL hosts instance IPs are also directly routable from the host itself.
+
 ## Custom resource IDs
 
 Tag `_custom_id_` on `CreateSecurityGroup` to choose the group ID:

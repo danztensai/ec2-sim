@@ -46,6 +46,40 @@ def _start_aws_proxy(host: str, port: int) -> None:
              CertificateCreator.cacert)
 
 
+def _forward_cmd(args) -> int:
+    import json as _json
+
+    from .vm import DockerVMManager
+
+    logging.getLogger("ec2sim").setLevel(logging.WARNING)  # keep CLI output clean
+    vm = DockerVMManager()
+    if args.cmd == "forward":
+        local = args.local or (args.remote_port + 10000 if args.remote_port < 1024 else args.remote_port)
+        try:
+            f = vm.add_forward(args.instance_id, args.remote_port, local, args.bind)
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(f"{f['bind']}:{f['local_port']} -> {args.instance_id} ({f['target']})  [{f['name']}]")
+        return 0
+    if args.cmd == "forwards":
+        fs = vm.list_forwards()
+        if args.json:
+            print(_json.dumps(fs))
+        else:
+            for f in fs:
+                print(f"{f['bind']}:{f['local_port']:<6} -> {f['instance_id']}:{f['remote_port']:<6} {f['status']:<8} {f['name']}")
+            if not fs:
+                print("no port forwards")
+        return 0
+    if not args.name and not args.all:
+        print("give a NAME (see `ec2-sim forwards`) or --all", file=sys.stderr)
+        return 2
+    n = vm.remove_forwards(name=None if args.all else args.name)
+    print(f"removed {n} forward(s)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ec2-sim", description=__doc__)
     sub = parser.add_subparsers(dest="cmd")
@@ -65,6 +99,16 @@ def main(argv: list[str] | None = None) -> None:
                        help="pass a variable; NAME alone takes the value from your environment")
     run_p.add_argument("command", nargs=argparse.REMAINDER, help="-- COMMAND [ARGS…]")
     sub.add_parser("stop-runs", help="stop all running `ec2-sim run` commands")
+    fwd = sub.add_parser("forward", help="publish localhost:PORT -> an instance port (any host OS)")
+    fwd.add_argument("instance_id")
+    fwd.add_argument("remote_port", type=int)
+    fwd.add_argument("--local", type=int, help="host port (default: same, or +10000 below 1024)")
+    fwd.add_argument("--bind", default="127.0.0.1", help="host address to listen on (default 127.0.0.1)")
+    lf = sub.add_parser("forwards", help="list port forwards")
+    lf.add_argument("--json", action="store_true")
+    uf = sub.add_parser("unforward", help="remove a port forward (NAME from `forwards`) or --all")
+    uf.add_argument("name", nargs="?")
+    uf.add_argument("--all", action="store_true")
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
     args = parser.parse_args(argv)
@@ -83,6 +127,8 @@ def main(argv: list[str] | None = None) -> None:
         from . import run as run_mod
 
         sys.exit(run_mod.stop_all())
+    if args.cmd in ("forward", "forwards", "unforward"):
+        sys.exit(_forward_cmd(args))
     if args.cmd == "ca-path":
         from moto.moto_proxy.proxy3 import CertificateCreator
 

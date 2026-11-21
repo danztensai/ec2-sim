@@ -1,6 +1,7 @@
 //! ec2-sim desktop UI: Tauri commands bridging the React frontend to the
 //! ec2-sim server process, its EC2 API, and the local Docker engine.
 
+mod cli;
 mod ec2;
 mod host;
 mod runner;
@@ -193,6 +194,47 @@ fn script_running(state: State<'_, AppState>) -> bool {
     state.runner.lock().unwrap().is_running()
 }
 
+// ---------------------------------------------------------------- port forwards
+
+fn ec2sim_dir(state: &State<'_, AppState>) -> String {
+    state.settings.lock().unwrap().ec2sim_dir.clone()
+}
+
+/// Publish localhost:local_port -> instance:remote_port (`ec2-sim forward`).
+#[tauri::command]
+async fn forward_add(state: State<'_, AppState>, instance_id: String, remote_port: u16, local_port: u16) -> Result<String, String> {
+    if !instance_id.starts_with("i-") || !instance_id[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("invalid instance id".into());
+    }
+    let dir = ec2sim_dir(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        cli::output(&dir, &["forward", &instance_id, &remote_port.to_string(), "--local", &local_port.to_string()])
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn forward_list(state: State<'_, AppState>) -> Result<Value, String> {
+    let dir = ec2sim_dir(&state);
+    let out = tauri::async_runtime::spawn_blocking(move || cli::output(&dir, &["forwards", "--json"]))
+        .await
+        .map_err(|e| e.to_string())??;
+    let json = out.lines().rev().find(|l| l.trim_start().starts_with('[')).unwrap_or("[]");
+    serde_json::from_str(json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn forward_remove(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    if !name.starts_with("ec2sim-fwd-") || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("invalid forward name".into());
+    }
+    let dir = ec2sim_dir(&state);
+    tauri::async_runtime::spawn_blocking(move || cli::output(&dir, &["unforward", &name]).map(|_| ()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = settings::load();
@@ -222,6 +264,9 @@ pub fn run() {
             run_script,
             stop_script,
             script_running,
+            forward_add,
+            forward_list,
+            forward_remove,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the ec2-sim UI")

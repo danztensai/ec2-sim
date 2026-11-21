@@ -129,29 +129,31 @@ class DockerVMManager:
                 LOG.exception("failed to build %s", base.docker_image)
 
     # ---------------------------------------------------------------- network
-    def _network_for_subnet(self, subnet_id: str | None, cidr: str | None) -> tuple[Any, bool]:
-        """Return (network, cidr_matches). Falls back to a shared network on overlap."""
+    def _network_for_vpc(self, vpc_id: str | None, vpc_cidr: str | None) -> tuple[Any, bool]:
+        """One bridge network per VPC (its CIDR), so instances in any of its subnets
+        reach each other, as in AWS. Returns (network, cidr_matches); falls back to
+        a shared network if the CIDR overlaps an existing Docker network."""
         with self._net_lock:
-            if subnet_id and cidr:
-                name = f"{config.PREFIX}-{subnet_id}"
+            if vpc_id and vpc_cidr:
+                name = f"{config.PREFIX}-{vpc_id}"
                 try:
                     return self.client.networks.get(name), True
                 except NotFound:
                     pass
                 try:
                     ipam = docker.types.IPAMConfig(
-                        pool_configs=[docker.types.IPAMPool(subnet=cidr)]
+                        pool_configs=[docker.types.IPAMPool(subnet=vpc_cidr)]
                     )
                     net = self.client.networks.create(
                         name,
                         driver="bridge",
                         ipam=ipam,
-                        labels={_label("subnet_id"): subnet_id},
+                        labels={_label("vpc_id"): vpc_id},
                     )
                     return net, True
                 except APIError as e:
                     LOG.warning("cannot create network for %s (%s): %s; using shared network",
-                                subnet_id, cidr, e.explanation)
+                                vpc_id, vpc_cidr, e.explanation)
             name = f"{config.PREFIX}-shared"
             try:
                 return self.client.networks.get(name), False
@@ -170,16 +172,23 @@ class DockerVMManager:
         image_ref: str,
         subnet_id: str | None,
         subnet_cidr: str | None,
+        vpc_id: str | None,
+        vpc_cidr: str | None,
         private_ip: str | None,
         ssh_pubkey: str | None,
         user_data_b64: str | None,
         instance_type: str,
+        aliases: list[str] | None = None,
     ) -> str:
-        """Start the container for an instance; returns its IP (inside the subnet when possible)."""
-        network, matches = self._network_for_subnet(subnet_id, subnet_cidr)
+        """Start the container for an instance; returns its IP (inside the subnet when possible).
+
+        `aliases` become DNS names for the instance on its VPC network."""
+        network, matches = self._network_for_vpc(vpc_id, vpc_cidr)
         self._attach_bastion(network)
         ip: str | None = None
-        if matches and subnet_cidr:
+        in_vpc = bool(subnet_cidr and vpc_cidr) and ipaddress.ip_network(subnet_cidr, strict=False).subnet_of(
+            ipaddress.ip_network(vpc_cidr, strict=False))
+        if matches and in_vpc:
             ip = private_ip if self._usable_ip(private_ip, subnet_cidr) and \
                 private_ip not in self._used_ips(network) else self._allocate_ip(network, subnet_cidr)
         hostname = "ip-" + ip.replace(".", "-") if ip else f"{config.PREFIX}-{instance_id}"
@@ -220,14 +229,20 @@ class DockerVMManager:
         except APIError:
             pass
         ip_ok = False
+        private_dns = []
+        if ip:
+            # AWS private DNS: ip-a-b-c-d.ec2.internal (us-east-1) / .<region>.compute.internal
+            suffix = "ec2.internal" if region == "us-east-1" else f"{region}.compute.internal"
+            private_dns = [f"{hostname}.{suffix}"]
+        dns = sorted({a for a in ([hostname] + private_dns + (aliases or [])) if a})
         if ip:
             try:
-                network.connect(container, ipv4_address=ip)
+                network.connect(container, ipv4_address=ip, aliases=dns)
                 ip_ok = True
             except APIError as e:
                 LOG.info("ip %s unavailable on %s: %s", ip, network.name, e.explanation)
         if not ip_ok:
-            network.connect(container)
+            network.connect(container, aliases=dns)
         if self.imds_network is not None:
             self.imds_network.connect(container)
         container.start()
@@ -355,6 +370,7 @@ class DockerVMManager:
             c.restart(timeout=config.STOP_TIMEOUT)
 
     def terminate_instance(self, instance_id: str) -> None:
+        self.remove_forwards(instance_id=instance_id)
         if c := self._container(instance_id):
             if config.REMOVE_CONTAINERS:
                 c.remove(force=True)
@@ -417,6 +433,79 @@ class DockerVMManager:
             out.append(meta)
         return out
 
+    # ------------------------------------------------------------ port forwards
+    FORWARDER_IMAGE = f"{config.PREFIX}/forwarder:latest"
+
+    def _instance_network_ip(self, instance_id: str) -> tuple[Any, str]:
+        c = self._container(instance_id)
+        if c is None:
+            raise RuntimeError(f"no running container for {instance_id}")
+        c.reload()
+        for name, net in c.attrs["NetworkSettings"]["Networks"].items():
+            if name != self.IMDS_NET and net.get("IPAddress"):
+                return self.client.networks.get(name), net["IPAddress"]
+        raise RuntimeError(f"{instance_id} has no network address (is it running?)")
+
+    def add_forward(self, instance_id: str, remote_port: int, local_port: int, bind: str = "127.0.0.1") -> dict:
+        """Publish bind:local_port on the host, forwarded to instance:remote_port.
+        Works on any host OS (Docker publishes to the host's localhost; on WSL that
+        is also reachable from Windows, on Docker Desktop from macOS/Windows)."""
+        network, ip = self._instance_network_ip(instance_id)
+        try:
+            self.client.images.get(self.FORWARDER_IMAGE)
+        except ImageNotFound:
+            self.slow_client.images.build(path=str(config.IMAGES_DIR), dockerfile="forwarder/Dockerfile",
+                                          tag=self.FORWARDER_IMAGE, rm=True)
+        name = f"{config.PREFIX}-fwd-{instance_id}-{remote_port}-{local_port}"
+        try:
+            self.client.containers.get(name).remove(force=True)
+        except NotFound:
+            pass
+        try:
+            self.client.containers.run(
+                self.FORWARDER_IMAGE,
+                [f"TCP-LISTEN:{remote_port},fork,reuseaddr", f"TCP:{ip}:{remote_port}"],
+                name=name,
+                detach=True,
+                network=network.name,
+                ports={f"{remote_port}/tcp": (bind, local_port)},
+                restart_policy={"Name": "unless-stopped"},
+                labels={
+                    _label("forward"): "true",
+                    _label("fwd_instance"): instance_id,
+                    _label("fwd_remote"): str(remote_port),
+                    _label("fwd_local"): str(local_port),
+                    _label("fwd_bind"): bind,
+                },
+            )
+        except APIError as e:
+            raise RuntimeError(f"cannot forward {bind}:{local_port}: {e.explanation}") from e
+        return {"name": name, "instance_id": instance_id, "remote_port": remote_port,
+                "local_port": local_port, "bind": bind, "target": f"{ip}:{remote_port}"}
+
+    def list_forwards(self) -> list[dict]:
+        out = []
+        for c in self.client.containers.list(all=True, filters={"label": _label("forward")}):
+            lb = c.labels
+            out.append({
+                "name": c.name,
+                "instance_id": lb.get(_label("fwd_instance"), ""),
+                "remote_port": int(lb.get(_label("fwd_remote"), "0")),
+                "local_port": int(lb.get(_label("fwd_local"), "0")),
+                "bind": lb.get(_label("fwd_bind"), "127.0.0.1"),
+                "status": c.status,
+            })
+        return sorted(out, key=lambda f: (f["instance_id"], f["remote_port"]))
+
+    def remove_forwards(self, name: str | None = None, instance_id: str | None = None) -> int:
+        n = 0
+        for c in self.client.containers.list(all=True, filters={"label": _label("forward")}):
+            if (name and c.name != name) or (instance_id and c.labels.get(_label("fwd_instance")) != instance_id):
+                continue
+            c.remove(force=True)
+            n += 1
+        return n
+
     # -------------------------------------------------------------- lifecycle
     def cleanup(self) -> None:
         """Remove instance containers and subnet networks (AMI images are kept)."""
@@ -426,11 +515,12 @@ class DockerVMManager:
         for c in self.client.containers.list(all=True, filters={"label": _label("instance_id")}):
             if c.labels.get(_label("instance_id")):
                 c.remove(force=True)
-        for key in ("imds", "bastion"):
+        for key in ("imds", "bastion", "forward"):
             for c in self.client.containers.list(all=True, filters={"label": _label(key)}):
                 c.remove(force=True)
         self.bastion = None
-        for n in self.client.networks.list(filters={"label": _label("subnet_id")}) + \
+        for n in self.client.networks.list(filters={"label": _label("vpc_id")}) + \
+                self.client.networks.list(filters={"label": _label("subnet_id")}) + \
                 self.client.networks.list(filters={"label": _label("imds")}) + \
                 self.client.networks.list(filters={"label": _label("shared")}):
             try:

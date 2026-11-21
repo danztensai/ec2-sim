@@ -288,3 +288,9 @@ td > .copy-text { color: var(--text); }
 .var-row .input-icon svg { left: 10px; }
 .run-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .page-fill .logbox { min-height: 260px; }
+
+/* ---------- port forwards ---------- */
+.forwards { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+.forwards-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.forward-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--border); }
+.forward-row:first-of-type { border-top: 0; }

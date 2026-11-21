@@ -1,6 +1,7 @@
 // Dialogs for one instance: Connect, Console output, Create AMI.
 import { useEffect, useState } from "react";
-import { Camera, RefreshCw, SquareTerminal } from "lucide-react";
+import { Camera, ExternalLink, Plug, RefreshCw, SquareTerminal } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, createImage, defaultUser, Instance, instanceAction } from "../api";
 import { useStore } from "../store";
 import { Button, CopyField, Field, Modal, Spinner, useToast } from "../ui";
@@ -182,6 +183,124 @@ export function CreateImageDialog({ instance, onClose, onCreated }: { instance?:
           Stop the instance first (what Packer does, for a consistent snapshot)
         </label>
       </div>
+    </Modal>
+  );
+}
+
+const PORT_PRESETS: { label: string; port: number; web?: boolean }[] = [
+  { label: "SSH", port: 22 },
+  { label: "HTTP", port: 80, web: true },
+  { label: "HTTPS", port: 443, web: true },
+  { label: "Postgres", port: 5432 },
+  { label: "MySQL", port: 3306 },
+  { label: "MongoDB", port: 27017 },
+  { label: "Redis", port: 6379 },
+  { label: "App 3000", port: 3000, web: true },
+  { label: "App 8080", port: 8080, web: true },
+];
+
+const defaultLocal = (p: number) => (p < 1024 ? p + 10000 : p);
+
+export function ForwardDialog({ instance, onClose, onCreated }: { instance: Instance; onClose: () => void; onCreated?: () => void }) {
+  const toast = useToast();
+  const [remote, setRemote] = useState(80);
+  const [local, setLocal] = useState(defaultLocal(80));
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ local: number; remote: number } | null>(null);
+  const web = PORT_PRESETS.find((p) => p.port === remote)?.web ?? (remote === 8000 || remote === 5000);
+  const valid = remote > 0 && remote < 65536 && local > 0 && local < 65536;
+
+  async function create() {
+    setBusy(true);
+    try {
+      await api.forwardAdd(instance.id, remote, local);
+      setDone({ local, remote });
+      onCreated?.();
+    } catch (e) {
+      toast("error", String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const url = done ? `${web && done.remote === 443 ? "https" : "http"}://localhost:${done.local}` : "";
+  return (
+    <Modal
+      title={`Port forward: ${instance.name || instance.id}`}
+      subtitle="Reach a port on this instance from your computer (Windows, WSL, macOS or Linux) at localhost."
+      onClose={onClose}
+      footer={
+        done ? (
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" icon={<Plug size={16} />} busy={busy} disabled={!valid} onClick={create}>
+              Create forward
+            </Button>
+          </>
+        )
+      }
+    >
+      {done ? (
+        <div className="stack">
+          <div className="callout info">
+            <b>localhost:{done.local}</b> now reaches <b>{instance.name || instance.id}</b> port {done.remote}. It stays until you remove it or
+            terminate the instance.
+          </div>
+          <CopyField value={`localhost:${done.local}`} label="Address on your computer" />
+          {done.remote === 22 && <CopyField value={`ssh -p ${done.local} -i <key.pem> <user>@localhost`} label="SSH" />}
+          {web && (
+            <div>
+              <Button icon={<ExternalLink size={16} />} onClick={() => openUrl(url)}>
+                Open {url}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="stack">
+          <Field label="Instance port">
+            <div className="template-row">
+              {PORT_PRESETS.map((p) => (
+                <button
+                  key={p.port}
+                  type="button"
+                  className={`chip ${remote === p.port ? "active" : ""}`}
+                  onClick={() => {
+                    setRemote(p.port);
+                    setLocal(defaultLocal(p.port));
+                  }}
+                >
+                  {p.label} · {p.port}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <div className="grid-2">
+            <Field label="Instance port (custom)">
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={remote}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setRemote(v);
+                  setLocal(defaultLocal(v));
+                }}
+              />
+            </Field>
+            <Field label="Port on your computer" hint="Ports below 1024 default to +10000">
+              <input type="number" min={1} max={65535} value={local} onChange={(e) => setLocal(Number(e.target.value))} />
+            </Field>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

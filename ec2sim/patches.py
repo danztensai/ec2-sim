@@ -72,6 +72,21 @@ def _arch() -> str:
     return "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
 
 
+def _dns_names(backend: Any, inst: Instance) -> list[str]:
+    """Names other instances in the VPC can use: instance ID and Name tag.
+    (The private DNS name is added once the IP is known.)"""
+    names = [inst.id]
+    try:
+        name_tag = next((t.get("value") for t in inst.get_tags() if t.get("key") == "Name"), None)
+    except Exception:  # noqa: BLE001 - names are a convenience; never block a boot
+        name_tag = None
+    if name_tag:
+        safe = "".join(c if c.isalnum() or c in "-." else "-" for c in name_tag.lower()).strip("-.")
+        if safe:
+            names.append(safe)
+    return names
+
+
 def _set_public_ip(instance: Instance, ip: str | None) -> None:
     if ip and instance.nics:
         instance.nics[0].public_ip = ip
@@ -273,12 +288,14 @@ def apply(vm: DockerVMManager | None) -> None:
         pubkey = None
         if inst.key_name and inst.key_name in backend.key_pairs:
             pubkey = backend.key_pairs[inst.key_name].public_key
-        cidr = None
+        cidr = vpc_id = vpc_cidr = None
         if inst.subnet_id:
             try:
-                cidr = backend.get_subnet(inst.subnet_id).cidr_block
+                subnet = backend.get_subnet(inst.subnet_id)
+                cidr, vpc_id = subnet.cidr_block, subnet.vpc_id
+                vpc_cidr = backend.get_vpc(vpc_id).cidr_block
             except Exception:  # noqa: BLE001
-                cidr = None
+                pass
         try:
             ip = VM.run_instance(  # type: ignore[union-attr]
                 instance_id=inst.id,
@@ -287,6 +304,9 @@ def apply(vm: DockerVMManager | None) -> None:
                 image_ref=image_ref,
                 subnet_id=inst.subnet_id,
                 subnet_cidr=cidr,
+                vpc_id=vpc_id,
+                vpc_cidr=vpc_cidr,
+                aliases=_dns_names(backend, inst),
                 private_ip=inst.private_ip,
                 ssh_pubkey=pubkey,
                 user_data_b64=_user_data_b64(inst.user_data),

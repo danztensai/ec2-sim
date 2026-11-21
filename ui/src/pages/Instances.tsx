@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Camera, MoreHorizontal, Play, Plus, RotateCw, ScrollText, Search, Server, Square, SquareTerminal, Trash2 } from "lucide-react";
-import { friendlyImageName, Instance, instanceAction, timeAgo } from "../api";
+import { Camera, MoreHorizontal, Play, Plug, Plus, RotateCw, ScrollText, Search, Server, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { api, Forward, friendlyImageName, Instance, instanceAction, timeAgo } from "../api";
 import { useStore } from "../store";
 import { Button, Confirm, CopyText, Empty, Spinner, StateBadge, useAction } from "../ui";
 import { useLaunch } from "./Launch";
-import { ConnectDialog, ConsoleDialog, CreateImageDialog } from "./InstanceDialogs";
+import { ConnectDialog, ConsoleDialog, CreateImageDialog, ForwardDialog } from "./InstanceDialogs";
 
-type Dialog = { kind: "connect" | "console" | "image" | "terminate"; instance: Instance } | null;
+type Dialog = { kind: "connect" | "console" | "image" | "terminate" | "forward"; instance: Instance } | null;
 
-function RowMenu({ instance, onPick }: { instance: Instance; onPick: (k: "reboot" | "image" | "terminate") => void }) {
+function RowMenu({ instance, onPick }: { instance: Instance; onPick: (k: "reboot" | "image" | "terminate" | "forward") => void }) {
   // Fixed-position menu (portal) so it is never clipped by the table's scroll area.
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -19,8 +19,8 @@ function RowMenu({ instance, onPick }: { instance: Instance; onPick: (k: "reboot
     const next = typeof o === "function" ? o(open) : o;
     if (!next || !btn.current) return setPos(null);
     const r = btn.current.getBoundingClientRect();
-    const below = window.innerHeight - r.bottom > 150;
-    setPos({ top: below ? r.bottom + 4 : r.top - 4 - 136, right: window.innerWidth - r.right });
+    const below = window.innerHeight - r.bottom > 190;
+    setPos({ top: below ? r.bottom + 4 : r.top - 4 - 172, right: window.innerWidth - r.right });
   };
   useEffect(() => {
     if (!open) return;
@@ -50,6 +50,9 @@ function RowMenu({ instance, onPick }: { instance: Instance; onPick: (k: "reboot
           <button disabled={instance.state !== "running"} onClick={() => (setOpen(false), onPick("reboot"))}>
             <RotateCw size={15} /> Reboot
           </button>
+          <button disabled={instance.state !== "running"} onClick={() => (setOpen(false), onPick("forward"))}>
+            <Plug size={15} /> Port forward…
+          </button>
           <button onClick={() => (setOpen(false), onPick("image"))}>
             <Camera size={15} /> Create AMI from this
           </button>
@@ -72,6 +75,14 @@ export default function Instances() {
   const [showTerminated, setShowTerminated] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [forwards, setForwards] = useState<Forward[]>([]);
+  const loadForwards = () => api.forwardList().then(setForwards).catch(() => {});
+  useEffect(() => {
+    if (!status?.running) return;
+    loadForwards();
+    const t = setInterval(loadForwards, 6000);
+    return () => clearInterval(t);
+  }, [status?.running]);
 
   const act = async (i: Instance, action: Parameters<typeof instanceAction>[0], msg: string) => {
     setPending((p) => ({ ...p, [i.id]: true }));
@@ -111,6 +122,39 @@ export default function Instances() {
           Launch instance
         </Button>
       </div>
+
+      {forwards.length > 0 && (
+        <div className="card forwards">
+          <div className="forwards-head">
+            <Plug size={16} /> <b>Port forwards</b> <span className="muted small">reachable from this computer</span>
+          </div>
+          {forwards.map((f) => {
+            const inst = instances.find((x) => x.id === f.instance_id);
+            return (
+              <div key={f.name} className="forward-row">
+                <CopyText value={`localhost:${f.local_port}`} />
+                <span className="muted">→</span>
+                <span>
+                  {inst?.name || f.instance_id} <span className="muted">port {f.remote_port}</span>
+                </span>
+                {f.status !== "running" && <span className="tag tag-warn">{f.status}</span>}
+                <div className="spacer" />
+                <button
+                  className="icon-btn"
+                  title="Remove forward"
+                  aria-label="Remove forward"
+                  onClick={async () => {
+                    await run(() => api.forwardRemove(f.name), `Removed localhost:${f.local_port}`);
+                    loadForwards();
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <Empty
@@ -184,7 +228,7 @@ export default function Instances() {
                         <RowMenu
                           instance={i}
                           onPick={(k) =>
-                            k === "reboot" ? act(i, "RebootInstances", `Rebooting ${i.id}`) : setDialog({ kind: k === "image" ? "image" : "terminate", instance: i })
+                            k === "reboot" ? act(i, "RebootInstances", `Rebooting ${i.id}`) : setDialog({ kind: k, instance: i })
                           }
                         />
                       </div>
@@ -200,6 +244,7 @@ export default function Instances() {
       {dialog?.kind === "connect" && <ConnectDialog instance={dialog.instance} onClose={() => setDialog(null)} />}
       {dialog?.kind === "console" && <ConsoleDialog instance={dialog.instance} onClose={() => setDialog(null)} />}
       {dialog?.kind === "image" && <CreateImageDialog instance={dialog.instance} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "forward" && <ForwardDialog instance={dialog.instance} onClose={() => setDialog(null)} onCreated={loadForwards} />}
       {dialog?.kind === "terminate" && (
         <Confirm
           danger

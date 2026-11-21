@@ -54,6 +54,8 @@ export type Image = {
 
 export type KeyPair = { name: string; fingerprint: string; localPath: string | null };
 
+export type Forward = { name: string; instance_id: string; remote_port: number; local_port: number; bind: string; status: string };
+
 type Json = any;
 type Params = Record<string, string>;
 
@@ -73,6 +75,10 @@ export const api = {
   saveKey: (name: string, material: string) => invoke<string>("save_key", { name, material }),
   keyPath: (name: string) => invoke<string | null>("key_path", { name }),
   deleteKeyFile: (name: string) => invoke<void>("delete_key_file", { name }),
+  forwardAdd: (instanceId: string, remotePort: number, localPort: number) =>
+    invoke<string>("forward_add", { instanceId, remotePort, localPort }),
+  forwardList: () => invoke<Forward[]>("forward_list"),
+  forwardRemove: (name: string) => invoke<void>("forward_remove", { name }),
 };
 
 // ------------------------------------------------------------------ helpers
