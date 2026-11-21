@@ -44,7 +44,7 @@ export default function Images({ go }: { go: (p: Page) => void }) {
               </div>
               <div className="ami-tile-meta">
                 <Tag>{img.architecture}</Tag>
-                {img.name.includes("bionic") && <Tag tone="info">systemd</Tag>}
+                {/systemd/i.test(img.description) && <Tag tone="info">systemd</Tag>}
               </div>
               <Button icon={<Rocket size={15} />} onClick={() => launch.open({ imageId: img.id })}>
                 Launch

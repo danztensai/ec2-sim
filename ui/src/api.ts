@@ -238,6 +238,7 @@ export function friendlyImageName(image: Image | undefined, fallback = ""): stri
     if (n.startsWith("al2023")) return "Amazon Linux 2023";
     if (n.includes("noble-24.04")) return "Ubuntu 24.04 LTS";
     if (n.includes("bionic-18.04")) return "Ubuntu 18.04 LTS (systemd)";
+    if (n.includes("resolute-26.04")) return "Ubuntu 26.04 LTS (systemd)";
   }
   return image.name || image.id;
 }
@@ -261,7 +262,9 @@ export function webName(i: Instance): string {
   return /^[a-z0-9][a-z0-9-]*$/.test(n) ? n : i.id;
 }
 
-export const webUrl = (i: Instance, port: number) => `http://${webName(i)}.localhost${port === 80 ? "" : `:${port}`}/`;
+/** 443 is TLS passthrough to the instance (its own certificate), so it is https. */
+export const webUrl = (i: Instance, port: number) =>
+  port === 443 ? `https://${webName(i)}.localhost/` : `http://${webName(i)}.localhost${port === 80 ? "" : `:${port}`}/`;
 
 // ------------------------------------------------------------------ web access (security groups)
 
