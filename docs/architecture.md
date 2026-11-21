@@ -89,3 +89,6 @@ cd ui && npx tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml
 - New base AMI: see [Adding a base AMI](../README.md#adding-a-base-ami).
 - UI change: run `npm run screenshots` in `ui/` and commit the updated
   `docs/images/` (see [Desktop app → Updating the screenshots](desktop-app.md#updating-the-screenshots)).
+- Docs change: edit `docs/` (never the wiki directly), then run
+  `python3 scripts/sync-wiki.py` to publish it to the
+  [wiki](https://github.com/danztensai/ec2-sim/wiki).
