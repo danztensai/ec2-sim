@@ -48,8 +48,11 @@ async fn status(state: State<'_, AppState>) -> Result<Status, String> {
     })
 }
 
+// Note: non-async Tauri commands run on the main (UI) thread. Anything that
+// spawns processes or touches the filesystem is async so the window never stalls.
+
 #[tauri::command]
-fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let s = state.settings.lock().unwrap().clone();
     state
         .server
@@ -118,22 +121,25 @@ fn shell_command(instance_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_terminal(command: String) -> Result<(), String> {
-    host::open_terminal(&command)
+async fn open_terminal(command: String) -> Result<(), String> {
+    // Waits briefly to detect terminals that crash on start: keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(move || host::open_terminal(&command))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn save_key(name: String, material: String) -> Result<String, String> {
+async fn save_key(name: String, material: String) -> Result<String, String> {
     host::save_key(&name, &material)
 }
 
 #[tauri::command]
-fn key_path(name: String) -> Option<String> {
+async fn key_path(name: String) -> Option<String> {
     host::key_path(&name)
 }
 
 #[tauri::command]
-fn delete_key_file(name: String) -> Result<(), String> {
+async fn delete_key_file(name: String) -> Result<(), String> {
     host::delete_key_file(&name)
 }
 

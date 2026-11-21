@@ -52,8 +52,11 @@ it under **Settings → ec2-sim folder** if you move things.
 
 Notes:
 
-- **WSL2:** the window opens through WSLg. If it renders blank, run with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- **WSL2:** the window opens through WSLg. Run it with
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` (otherwise it may render blank). Leave it in
+  the default Wayland mode: forcing X11 (`GDK_BACKEND=x11`) makes input laggy and
+  the first click only focuses the window. If it still feels slow, also set
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`.
 - **macOS/Windows (Docker Desktop):** ec2-sim switches to bastion mode
   automatically; the Connect dialog builds the SSH command accordingly.
 - **Open in terminal** uses Terminal.app on macOS, `cmd` on Windows, and the first
