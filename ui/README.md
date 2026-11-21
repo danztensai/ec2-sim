@@ -4,11 +4,13 @@ A desktop UI for [ec2-sim](../README.md), built with [Tauri 2](https://tauri.app
 (Rust) and React. Start the simulator, launch instances, connect to them, and
 bake AMIs without touching the command line.
 
-![Overview](docs/overview.png)
+![Overview](../docs/images/overview.png)
 
 | Launch wizard | Instances | AMIs |
 |---|---|---|
-| ![Launch](docs/launch.png) | ![Instances](docs/instances.png) | ![AMIs](docs/amis.png) |
+| ![Launch](../docs/images/launch.png) | ![Instances](../docs/images/instances.png) | ![AMIs](../docs/images/amis.png) |
+
+A page-by-page tour is in [docs/desktop-app.md](../docs/desktop-app.md).
 
 ## What you can do
 
@@ -23,8 +25,13 @@ bake AMIs without touching the command line.
   - *Shell*: a root shell via `docker exec`, no key needed.
   - *SSH*: the exact `ssh` command, with your saved key and, on Docker Desktop,
     the bastion jump host.
-  
-  Both can open your terminal directly or copy the command.
+  - *Browser*: `http://<name>.localhost` links per port, with Allow/Revoke
+    (edits the instance's security group) and Add port.
+
+  Shell and SSH can open your terminal directly or copy the command.
+- **Port forwards** (⋯ → Port forward): any instance port on your localhost.
+- **Run script**: run your own build command, unmodified, against ec2-sim
+  (see [Baking AMIs](../docs/baking-amis.md#3-run-your-existing-build-script-unmodified)).
 - **Console**: user-data output and the instance's boot log.
 - **Start / Stop / Reboot / Terminate** from each row, with confirmation for destructive actions.
 - **Bake an AMI** from any instance (optionally stopping it first, like Packer),
@@ -100,6 +107,8 @@ Notes:
   - `store.tsx`: shared state, polled every 1.5 to 4 seconds.
   - `pages/`: the screens.
   - `ui.tsx`: buttons, modals, toasts.
+- `screenshots/`: renders the app with demo data for the documentation
+  screenshots (`npm run screenshots`).
 
 The app talks to ec2-sim only through its public EC2 API and Docker, so it works
 with any ec2-sim server on the configured endpoint.

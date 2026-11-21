@@ -7,8 +7,28 @@ and without an AWS account.
 
 Why use it, what it's for, and what it saves: [docs/why-ec2-sim.md](docs/why-ec2-sim.md).
 
-Prefer clicking? The [desktop app](ui/README.md) (Tauri) starts the simulator,
-launches and connects to instances, and bakes AMIs from a GUI.
+Prefer clicking? The [desktop app](docs/desktop-app.md) (Tauri) starts the simulator,
+launches and connects to instances, bakes AMIs and runs your build scripts from a GUI.
+
+![ec2-sim desktop app: instances](docs/images/instances.png)
+
+| Launch | Open in your browser by name | Run your build script unmodified |
+|---|---|---|
+| ![Launch wizard](docs/images/launch.png) | ![Connect: browser access](docs/images/web-access.png) | ![Run script](docs/images/run-script.png) |
+
+## Documentation
+
+| Guide | |
+|---|---|
+| [Getting started](docs/getting-started.md) | install, launch, connect, bake your first AMI |
+| [Desktop app](docs/desktop-app.md) | a tour of the GUI, page by page |
+| [Baking AMIs](docs/baking-amis.md) | by hand, with Packer, or with your existing pipeline (`ec2-sim run`) |
+| [Networking](docs/networking.md) | instance ↔ instance, `http://<name>.localhost`, port forwards, security groups |
+| [Multi-tier testing](docs/multi-tier-testing.md) | an app and its databases in a VPC that mirrors production |
+| [Troubleshooting](docs/troubleshooting.md) | common problems and fixes |
+| [Architecture](docs/architecture.md) | how it works, code map, contributing |
+
+The rest of this README is the reference.
 
 | EC2 | ec2-sim |
 |---|---|
