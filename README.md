@@ -230,7 +230,7 @@ Scripts must have LF line endings: on Windows, run them from a checkout inside W
   Windows, on Docker Desktop from macOS/Windows. Forwards are removed when the
   instance is terminated or the server stops. In the desktop app:
   **Instances → ⋯ → Port forward…**.
-- **Web apps by name** through the HTTP gateway (on by default, port 80):
+- **Web apps by name** through the HTTP gateway (on by default, ports 80 and 443):
   `http://<instance-name>.localhost/` → that instance's port 80, and
   `http://<name>.localhost:9404/` → port 9404 once that port is added:
 
@@ -240,6 +240,8 @@ Scripts must have LF line endings: on Windows, run them from a checkout inside W
   ```
 
   The name is the instance's **Name tag** (lowercased) or its instance ID.
+  Port **443 is TLS passthrough**: `https://<name>.localhost/` is routed by SNI
+  to the instance's port 443 and the instance's own certificate is used.
 
   **Who can be reached** follows security groups, like a public instance on AWS:
   `name:PORT` works only if one of the instance's security groups allows
@@ -317,7 +319,7 @@ Both expect a running server on `localhost:4566`. In bastion mode, run them with
 | `EC2SIM_BASTION_PORT` | `2222` | bastion SSH port on `127.0.0.1` (bastion mode) |
 | `EC2SIM_BASTION_PUBKEY` | – | public key(s) allowed to log in to the bastion as `ec2sim` |
 | `EC2SIM_IMDS_BIND` | `127.0.0.1` | IMDS backend bind address in bastion mode |
-| `EC2SIM_GATEWAY_PORTS` | `80` | HTTP gateway ports (`""` = off); more via `ec2-sim gateway add-port` |
+| `EC2SIM_GATEWAY_PORTS` | `80,443` | HTTP gateway ports (`""` = off); more via `ec2-sim gateway add-port` |
 | `EC2SIM_GATEWAY_BIND` | `127.0.0.1` | address the gateway publishes on |
 | `EC2SIM_GATEWAY_ACCESS` | `security-groups` | `security-groups` (inbound rules / `ec2sim:web` tag decide) or `open` |
 
@@ -342,6 +344,8 @@ Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
   instances and port forwards are not filtered.
 - AMI tags and EBS volumes/snapshots are metadata only: not restored after a
   restart and not captured by `CreateImage`.
+- `/etc/hosts` is managed by Docker; entries a provisioner adds are carried into
+  the AMI (as a label) and restored on instances launched from it.
 - Instance-profile credentials are random strings: accepted by ec2-sim, not by
   real AWS STS or services that verify them there.
 - Not implemented: Launch Template-backed ASG details, EC2 Image Builder.

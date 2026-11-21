@@ -211,10 +211,12 @@ def main(argv: list[str] | None = None) -> None:
         if vm.network_mode == "bastion":
             vm.ensure_bastion()
         try:
-            vm.ensure_gateway(gateway_ports_wanted())
-            from . import access
+            wanted = gateway_ports_wanted()
+            if wanted:  # an empty list would remove a gateway another server runs
+                vm.ensure_gateway(wanted)
+                from . import access
 
-            access.start_sync(vm)
+                access.start_sync(vm)
         except Exception as e:  # noqa: BLE001 - the gateway is optional
             LOG.warning("HTTP gateway not started: %s", e)
         from . import imds

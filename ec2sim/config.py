@@ -56,7 +56,7 @@ IMDS_BIND = os.environ.get("EC2SIM_IMDS_BIND", "127.0.0.1")
 # HTTP gateway: http://<instance-name>.localhost[:PORT] on the host -> instance:PORT.
 # Ports it listens on (comma-separated); more can be added at runtime
 # (`ec2-sim gateway add-port N`, saved in ~/.ec2-sim/gateway-ports). "" = off.
-GATEWAY_PORTS = os.environ.get("EC2SIM_GATEWAY_PORTS", "80")
+GATEWAY_PORTS = os.environ.get("EC2SIM_GATEWAY_PORTS", "80,443")
 GATEWAY_BIND = os.environ.get("EC2SIM_GATEWAY_BIND", "127.0.0.1")
 GATEWAY_PORTS_FILE = Path.home() / ".ec2-sim" / "gateway-ports"
 # Who the gateway lets through:

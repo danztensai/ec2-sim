@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import ipaddress
 import json
+import tarfile
 import logging
 import threading
 from typing import Any
@@ -115,17 +116,26 @@ class DockerVMManager:
         except NotFound:
             return None
 
+    # Ports served as TLS passthrough (routed by SNI, the instance terminates TLS).
+    TLS_PORTS = {443}
+
     @staticmethod
     def gateway_conf(ports: list[int], allowed: set[str] | None) -> str:
-        """nginx: <name>.localhost:P -> <name>:P (names resolved by Docker DNS:
-        instance Name tag / instance ID aliases on the VPC networks).
-        `allowed` = {"name:port", ...}; None means open to every instance."""
+        """Full nginx.conf for the gateway.
+
+        HTTP ports: <name>.localhost:P -> <name>:P (Host header).
+        TLS ports (443): SNI <name>.localhost -> <name>:443, passed through untouched.
+        Names resolve via Docker DNS (instance Name tag / instance ID on the VPC
+        networks). `allowed` = {"name:port", ...}; None = open to every instance."""
         def q(x: str) -> str:
             return '"' + x.replace('"', "") + '"'
+
+        http_ports = [p for p in ports if p not in DockerVMManager.TLS_PORTS]
+        tls_ports = [p for p in ports if p in DockerVMManager.TLS_PORTS]
         entries = " ".join(f"{q(a)} 1;" for a in sorted(allowed or ()))
         default = "1" if allowed is None else "0"
         servers = []
-        for p in ports:
+        for p in http_ports:
             servers.append(
                 f"server {{ listen {p}; server_name ~^(?<inst>[a-z0-9][a-z0-9-]*)\\.localhost$; "
                 "location / { default_type text/plain; if ($ec2sim_allowed = 0) { "
@@ -142,10 +152,27 @@ class DockerVMManager:
                 f"return 404 'ec2-sim gateway: use http://<instance-name>.localhost:{p}/ "
                 "(instance Name tag or instance ID)\\n'; }"
             )
-        return ("resolver 127.0.0.11 valid=5s ipv6=off; "
-                "map $http_upgrade $connection_upgrade { default upgrade; '' close; } "
-                f"map \"$inst:$server_port\" $ec2sim_allowed {{ default {default}; {entries} }} "
-                + " ".join(servers))
+        http = (
+            "http { access_log off; resolver 127.0.0.11 valid=5s ipv6=off; "
+            "map $http_upgrade $connection_upgrade { default upgrade; '' close; } "
+            f"map \"$inst:$server_port\" $ec2sim_allowed {{ default {default}; {entries} }} "
+            + " ".join(servers) + " }"
+        )
+        stream = ""
+        if tls_ports:
+            tls_servers = []
+            for p in tls_ports:
+                if allowed is None:
+                    backend = f"map $ssl_preread_server_name $ec2sim_tls_{p} {{ ~^(?<n>[a-z0-9][a-z0-9-]*)\\.localhost$ $n:{p}; default ''; }}"
+                else:
+                    names = sorted(a.rsplit(":", 1)[0] for a in (allowed or ()) if a.endswith(f":{p}"))
+                    pairs = " ".join(f"{q(n + '.localhost')} {n}:{p};" for n in names)
+                    backend = f"map $ssl_preread_server_name $ec2sim_tls_{p} {{ default ''; {pairs} }}"
+                tls_servers.append(f"{backend} server {{ listen {p}; ssl_preread on; proxy_pass $ec2sim_tls_{p}; "
+                                   "proxy_connect_timeout 5s; }")
+            stream = "stream { resolver 127.0.0.11 valid=5s ipv6=off; " + " ".join(tls_servers) + " }"
+        return ("worker_processes 1; error_log /dev/stderr warn; pid /tmp/nginx.pid; "
+                "events { worker_connections 1024; } " + http + " " + stream)
 
     def update_gateway_access(self, allowed: set[str] | None) -> bool:
         """Rewrite the gateway's allow-map and reload nginx if it changed."""
@@ -156,7 +183,7 @@ class DockerVMManager:
         if getattr(self, "_gw_access_key", None) == key:
             return False
         conf = self.gateway_conf(self.gateway_ports(), allowed)
-        res = g.exec_run(["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/conf.d/default.conf && nginx -s reload"],
+        res = g.exec_run(["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/nginx.conf && nginx -s reload"],
                          environment={"GW_CONF": conf})
         if res.exit_code != 0:
             LOG.warning("gateway reload failed: %s", res.output.decode(errors="replace").strip())
@@ -184,7 +211,7 @@ class DockerVMManager:
             try:
                 g = self.client.containers.run(
                     config.IMDS_PROXY_IMAGE,
-                    ["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"],
+                    ["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"],
                     name=self.GATEWAY,
                     detach=True,
                     environment={"GW_CONF": self.gateway_conf(published, None if mode == "open" else set())},
@@ -342,6 +369,9 @@ class DockerVMManager:
                     for unit in SYSTEMD_MASKED_UNITS
                 ],
             }
+        extra_hosts = self.image_extra_hosts(image_ref)
+        if extra_hosts:
+            run_opts["extra_hosts"] = extra_hosts
         run_opts.update(json.loads(config.DOCKER_RUN_EXTRA) if config.DOCKER_RUN_EXTRA else {})
         container = self.client.containers.create(
             image_ref,
@@ -515,6 +545,48 @@ class DockerVMManager:
         return self._container(instance_id) is not None
 
     # ------------------------------------------------------------------- AMIs
+    # Docker manages /etc/hosts per container (bind mount), so `docker commit`
+    # drops entries a provisioner added. Real AMIs keep them: carry them in a label.
+    _HOSTS_DEFAULT_NAMES = {"localhost", "ip6-localhost", "ip6-loopback", "ip6-localnet",
+                            "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters"}
+
+    def _baked_hosts(self, c) -> list[list]:
+        """Extra /etc/hosts entries of a container: [[ip, [names...]], ...]."""
+        try:
+            stream, _ = c.get_archive("/etc/hosts")
+            data = b"".join(stream)
+            with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+                member = tar.next()
+                text = tar.extractfile(member).read().decode(errors="replace") if member else ""
+        except Exception as e:  # noqa: BLE001
+            LOG.info("could not read /etc/hosts of %s: %s", c.name, e)
+            return []
+        own = {net.get("IPAddress") for net in (c.attrs.get("NetworkSettings", {}).get("Networks") or {}).values()}
+        return self.parse_extra_hosts(text, own)
+
+    @classmethod
+    def parse_extra_hosts(cls, text: str, own_ips: set) -> list[list]:
+        """Entries a provisioner added to /etc/hosts (not Docker's defaults or the
+        container's own address): [[ip, [names...]], ...]."""
+        out: dict[str, list[str]] = {}
+        for line in text.splitlines():
+            parts = line.split("#", 1)[0].split()
+            if len(parts) < 2 or parts[0] in own_ips:
+                continue
+            names = [n for n in parts[1:] if n not in cls._HOSTS_DEFAULT_NAMES]
+            if names:
+                out.setdefault(parts[0], [])
+                out[parts[0]] += [n for n in names if n not in out[parts[0]]]
+        return [[ip, names] for ip, names in out.items()]
+
+    def image_extra_hosts(self, image_ref: str) -> dict[str, str]:
+        """name -> ip for /etc/hosts entries baked into an AMI image."""
+        try:
+            raw = (self.client.images.get(image_ref).labels or {}).get(_label("etc_hosts"))
+            return {name: ip for ip, names in json.loads(raw or "[]") for name in names}
+        except Exception:  # noqa: BLE001
+            return {}
+
     def commit_instance(self, instance_id: str, ami_id: str, labels: dict[str, str]) -> str:
         """CreateImage: snapshot the instance's filesystem into ec2sim/ami:<ami-id>."""
         c = self._container(instance_id)
@@ -522,6 +594,10 @@ class DockerVMManager:
             raise RuntimeError(f"no container for {instance_id}")
         all_labels = {_label(k): v for k, v in labels.items()}
         all_labels[_label("ami_id")] = ami_id
+        c.reload()
+        hosts = self._baked_hosts(c)
+        if hosts:
+            all_labels[_label("etc_hosts")] = json.dumps(hosts)
         # Drop the source instance's labels so the image isn't mistaken for an instance.
         for key in ("instance_id",):
             all_labels.setdefault(_label(key), "")
@@ -549,8 +625,10 @@ class DockerVMManager:
         return ref
 
     def remove_ami_image(self, ami_id: str) -> None:
+        """DeregisterImage. Like AWS, allowed while instances from it still run:
+        the tag goes now (force), Docker frees the layers when the last user exits."""
         try:
-            self.client.images.remove(f"{config.AMI_REPO}:{ami_id}", noprune=False)
+            self.client.images.remove(f"{config.AMI_REPO}:{ami_id}", force=True, noprune=False)
         except (ImageNotFound, APIError) as e:
             LOG.info("could not remove image for %s: %s", ami_id, e)
 
@@ -560,6 +638,9 @@ class DockerVMManager:
         for img in self.client.images.list(filters={"label": _label("ami_id")}):
             labels = img.labels or {}
             if labels.get(_label("account")) != account_id or labels.get(_label("region")) != region:
+                continue
+            # Deregistered AMIs lose their tag (layers may linger while in use): skip them.
+            if f"{config.AMI_REPO}:{labels.get(_label('ami_id'))}" not in (img.tags or []):
                 continue
             meta = {k[len(config.LABEL) + 1:]: v for k, v in labels.items()
                     if k.startswith(config.LABEL + ".")}
