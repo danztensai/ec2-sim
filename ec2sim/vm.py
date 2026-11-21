@@ -23,6 +23,14 @@ from .catalog import BASE_AMIS, BaseAmi
 LOG = logging.getLogger("ec2sim.vm")
 
 
+# Units that must never run inside an instance container (they act on the host).
+SYSTEMD_MASKED_UNITS = (
+    "systemd-binfmt.service",
+    "proc-sys-fs-binfmt_misc.automount",
+    "proc-sys-fs-binfmt_misc.mount",
+)
+
+
 def _label(key: str) -> str:
     return f"{config.LABEL}.{key}"
 
@@ -88,14 +96,103 @@ class DockerVMManager:
                  config.BASTION_PORT, config.BASTION_PORT)
 
     def _attach_bastion(self, network) -> None:
-        if self.bastion is None:
-            return
+        """Join helper containers (SSH bastion, HTTP gateway) to an instance network."""
         network.reload()
-        if self.bastion.id not in network.attrs.get("Containers", {}):
+        attached = network.attrs.get("Containers", {})
+        for helper in (self.bastion, self._gateway()):
+            if helper is not None and helper.id not in attached:
+                try:
+                    network.connect(helper)
+                except APIError as e:
+                    LOG.warning("could not attach %s to %s: %s", helper.name, network.name, e.explanation)
+
+    # ---------------------------------------------------------------- gateway
+    GATEWAY = f"{config.PREFIX}-gateway"
+
+    def _gateway(self):
+        try:
+            return self.client.containers.get(self.GATEWAY)
+        except NotFound:
+            return None
+
+    @staticmethod
+    def gateway_conf(ports: list[int]) -> str:
+        """nginx: <name>.localhost:P -> <name>:P, names resolved by Docker DNS
+        (instance Name tag / instance ID aliases on the VPC networks)."""
+        servers = []
+        for p in ports:
+            servers.append(
+                f"server {{ listen {p}; server_name ~^(?<inst>[a-z0-9][a-z0-9-]*)\\.localhost$; "
+                f"location / {{ proxy_pass http://$inst:{p}; proxy_http_version 1.1; "
+                "proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; "
+                "proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; "
+                "proxy_set_header Connection $connection_upgrade; proxy_read_timeout 3600s; "
+                "proxy_intercept_errors off; error_page 502 504 = @noinst; } "
+                f"location @noinst {{ default_type text/plain; return 502 'ec2-sim gateway: nothing answering at "
+                f"instance \"$inst\" port {p} (is the instance running, named \"$inst\" (Name tag or ID), "
+                "and listening on 0.0.0.0?)\\n'; } } "
+                f"server {{ listen {p} default_server; default_type text/plain; "
+                f"return 404 'ec2-sim gateway: use http://<instance-name>.localhost:{p}/ "
+                "(instance Name tag or instance ID)\\n'; }"
+            )
+        return ("resolver 127.0.0.11 valid=5s ipv6=off; "
+                "map $http_upgrade $connection_upgrade { default upgrade; '' close; } " + " ".join(servers))
+
+    def ensure_gateway(self, ports: list[int]) -> list[int]:
+        """(Re)create the gateway publishing `ports` on GATEWAY_BIND; returns the ports
+        actually published (ports already in use on the host are skipped)."""
+        if (g := self._gateway()) is not None:
+            g.remove(force=True)
+        ports = sorted(set(p for p in ports if 0 < p < 65536))
+        if not ports:
+            return []
+        try:
+            self.client.images.get(config.IMDS_PROXY_IMAGE)
+        except ImageNotFound:
+            self.slow_client.images.pull(config.IMDS_PROXY_IMAGE)
+        published = list(ports)
+        while published:
             try:
-                network.connect(self.bastion)
+                g = self.client.containers.run(
+                    config.IMDS_PROXY_IMAGE,
+                    ["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"],
+                    name=self.GATEWAY,
+                    detach=True,
+                    environment={"GW_CONF": self.gateway_conf(published)},
+                    ports={f"{p}/tcp": (config.GATEWAY_BIND, p) for p in published},
+                    labels={_label("gateway"): "true", _label("gateway_ports"): ",".join(map(str, published))},
+                )
+                break
             except APIError as e:
-                LOG.warning("could not attach bastion to %s: %s", network.name, e.explanation)
+                # A port in use on the host: drop it and retry with the rest.
+                bad = next((p for p in published if f":{p}" in str(e.explanation)), None)
+                try:
+                    self.client.containers.get(self.GATEWAY).remove(force=True)
+                except NotFound:
+                    pass
+                if bad is None:
+                    LOG.warning("HTTP gateway disabled: %s", e.explanation)
+                    return []
+                LOG.warning("gateway: host port %s is in use, skipping it", bad)
+                published.remove(bad)
+        else:
+            return []
+        # Join every existing instance network.
+        for n in self.client.networks.list(filters={"label": _label("vpc_id")}) + \
+                self.client.networks.list(filters={"label": _label("shared")}):
+            try:
+                n.connect(g)
+            except APIError:
+                pass
+        LOG.info("HTTP gateway: http://<instance-name>.localhost%s on %s",
+                 "" if published == [80] else ":" + "/".join(map(str, published)), config.GATEWAY_BIND)
+        return published
+
+    def gateway_ports(self) -> list[int]:
+        g = self._gateway()
+        if g is None:
+            return []
+        return [int(p) for p in (g.labels.get(_label("gateway_ports")) or "").split(",") if p]
 
     # ------------------------------------------------------------ base images
     def ensure_base_image(self, base: BaseAmi) -> str:
@@ -207,6 +304,13 @@ class DockerVMManager:
                 "privileged": True,
                 "cgroupns": "private",
                 "tmpfs": {"/run": "rw,exec", "/run/lock": "rw"},
+                # /proc/sys/fs/binfmt_misc is kernel-global: a privileged container's
+                # systemd-binfmt would wipe the HOST's registrations (e.g. WSL interop,
+                # qemu-user). Mask it, also for AMIs baked before images masked it.
+                "mounts": [
+                    docker.types.Mount(f"/etc/systemd/system/{unit}", "/dev/null", type="bind", read_only=True)
+                    for unit in SYSTEMD_MASKED_UNITS
+                ],
             }
         run_opts.update(json.loads(config.DOCKER_RUN_EXTRA) if config.DOCKER_RUN_EXTRA else {})
         container = self.client.containers.create(
@@ -515,7 +619,7 @@ class DockerVMManager:
         for c in self.client.containers.list(all=True, filters={"label": _label("instance_id")}):
             if c.labels.get(_label("instance_id")):
                 c.remove(force=True)
-        for key in ("imds", "bastion", "forward"):
+        for key in ("imds", "bastion", "forward", "gateway"):
             for c in self.client.containers.list(all=True, filters={"label": _label(key)}):
                 c.remove(force=True)
         self.bastion = None

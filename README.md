@@ -230,6 +230,20 @@ Scripts must have LF line endings: on Windows, run them from a checkout inside W
   Windows, on Docker Desktop from macOS/Windows. Forwards are removed when the
   instance is terminated or the server stops. In the desktop app:
   **Instances → ⋯ → Port forward…**.
+- **Web apps by name** through the HTTP gateway (on by default, port 80):
+  `http://<instance-name>.localhost/` → that instance's port 80, and
+  `http://<name>.localhost:9404/` → port 9404 once that port is added:
+
+  ```bash
+  uv run ec2-sim gateway add-port 9404   # saved in ~/.ec2-sim/gateway-ports
+  uv run ec2-sim gateway                 # list ports
+  ```
+
+  The name is the instance's **Name tag** (lowercased) or its instance ID.
+  `*.localhost` resolves to your own machine in browsers and curl on Windows,
+  macOS and Linux, so no DNS or hosts-file setup is needed. Apps must listen on
+  `0.0.0.0`. For bare names (`http://app2:9404`) add hosts-file entries pointing
+  to 127.0.0.1 (needs admin). In the app: **Connect → Browser**.
 - On Linux/WSL hosts instance IPs are also directly routable from the host itself.
 
 ## Custom resource IDs
@@ -288,6 +302,8 @@ Both expect a running server on `localhost:4566`. In bastion mode, run them with
 | `EC2SIM_BASTION_PORT` | `2222` | bastion SSH port on `127.0.0.1` (bastion mode) |
 | `EC2SIM_BASTION_PUBKEY` | – | public key(s) allowed to log in to the bastion as `ec2sim` |
 | `EC2SIM_IMDS_BIND` | `127.0.0.1` | IMDS backend bind address in bastion mode |
+| `EC2SIM_GATEWAY_PORTS` | `80` | HTTP gateway ports (`""` = off); more via `ec2-sim gateway add-port` |
+| `EC2SIM_GATEWAY_BIND` | `127.0.0.1` | address the gateway publishes on |
 
 Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
 (remove stray instance containers and networks, keep AMIs), `ec2-sim ca-path`.

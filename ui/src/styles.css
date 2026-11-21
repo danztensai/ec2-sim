@@ -294,3 +294,5 @@ td > .copy-text { color: var(--text); }
 .forwards-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
 .forward-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--border); }
 .forward-row:first-of-type { border-top: 0; }
+
+.web-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }

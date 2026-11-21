@@ -53,6 +53,13 @@ BASTION_PUBKEY = os.environ.get("EC2SIM_BASTION_PUBKEY", "")
 # via host.docker.internal). In routed mode it binds to IMDS_GATEWAY.
 IMDS_BIND = os.environ.get("EC2SIM_IMDS_BIND", "127.0.0.1")
 
+# HTTP gateway: http://<instance-name>.localhost[:PORT] on the host -> instance:PORT.
+# Ports it listens on (comma-separated); more can be added at runtime
+# (`ec2-sim gateway add-port N`, saved in ~/.ec2-sim/gateway-ports). "" = off.
+GATEWAY_PORTS = os.environ.get("EC2SIM_GATEWAY_PORTS", "80")
+GATEWAY_BIND = os.environ.get("EC2SIM_GATEWAY_BIND", "127.0.0.1")
+GATEWAY_PORTS_FILE = Path.home() / ".ec2-sim" / "gateway-ports"
+
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
 
 # Prefix for every Docker object ec2-sim creates.

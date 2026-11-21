@@ -79,6 +79,8 @@ export const api = {
     invoke<string>("forward_add", { instanceId, remotePort, localPort }),
   forwardList: () => invoke<Forward[]>("forward_list"),
   forwardRemove: (name: string) => invoke<void>("forward_remove", { name }),
+  gatewayList: () => invoke<{ ports: number[]; bind: string }>("gateway_list"),
+  gatewaySetPort: (port: number, enabled: boolean) => invoke<void>("gateway_set_port", { port, enabled }),
 };
 
 // ------------------------------------------------------------------ helpers
@@ -245,3 +247,14 @@ export function timeAgo(iso: string): string {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return `${Math.floor(s / 86400)} d ago`;
 }
+
+/** Host name the HTTP gateway knows an instance by (Name tag, else instance ID). */
+export function webName(i: Instance): string {
+  const n = i.name
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return /^[a-z0-9][a-z0-9-]*$/.test(n) ? n : i.id;
+}
+
+export const webUrl = (i: Instance, port: number) => `http://${webName(i)}.localhost${port === 80 ? "" : `:${port}`}/`;

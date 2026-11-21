@@ -46,6 +46,53 @@ def _start_aws_proxy(host: str, port: int) -> None:
              CertificateCreator.cacert)
 
 
+def gateway_ports_wanted() -> list[int]:
+    """EC2SIM_GATEWAY_PORTS plus ports added with `ec2-sim gateway add-port`."""
+    ports = {int(p) for p in config.GATEWAY_PORTS.replace(" ", "").split(",") if p.isdigit()}
+    try:
+        ports |= {int(p) for p in config.GATEWAY_PORTS_FILE.read_text().split() if p.isdigit()}
+    except FileNotFoundError:
+        pass
+    return sorted(ports)
+
+
+def _gateway_cmd(args) -> int:
+    from .vm import DockerVMManager
+
+    logging.getLogger("ec2sim").setLevel(logging.WARNING)
+    vm = DockerVMManager()
+    saved = set()
+    try:
+        saved = {int(p) for p in config.GATEWAY_PORTS_FILE.read_text().split() if p.isdigit()}
+    except FileNotFoundError:
+        pass
+    if args.action in ("add-port", "remove-port"):
+        if not args.port or not 0 < args.port < 65536:
+            print("give a port number", file=sys.stderr)
+            return 2
+        (saved.add if args.action == "add-port" else saved.discard)(args.port)
+        config.GATEWAY_PORTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.GATEWAY_PORTS_FILE.write_text("\n".join(map(str, sorted(saved))) + "\n")
+        wanted = gateway_ports_wanted()
+        if args.action == "remove-port" and args.port in wanted:
+            wanted.remove(args.port)  # also drop it if it only came from the env default
+        published = vm.ensure_gateway(wanted)
+        if args.action == "add-port" and args.port not in published:
+            print(f"error: host port {args.port} is in use", file=sys.stderr)
+            return 1
+    ports = vm.gateway_ports()
+    if args.json:
+        import json as _json
+
+        print(_json.dumps({"ports": ports, "bind": config.GATEWAY_BIND}))
+    elif ports:
+        for p in ports:
+            print(f"http://<instance-name>.localhost{'' if p == 80 else f':{p}'}/  ->  instance port {p}")
+    else:
+        print("HTTP gateway is not running")
+    return 0
+
+
 def _forward_cmd(args) -> int:
     import json as _json
 
@@ -106,6 +153,10 @@ def main(argv: list[str] | None = None) -> None:
     fwd.add_argument("--bind", default="127.0.0.1", help="host address to listen on (default 127.0.0.1)")
     lf = sub.add_parser("forwards", help="list port forwards")
     lf.add_argument("--json", action="store_true")
+    gw = sub.add_parser("gateway", help="HTTP gateway: http://<instance-name>.localhost[:PORT]")
+    gw.add_argument("action", nargs="?", default="list", choices=["list", "add-port", "remove-port"])
+    gw.add_argument("port", nargs="?", type=int)
+    gw.add_argument("--json", action="store_true")
     uf = sub.add_parser("unforward", help="remove a port forward (NAME from `forwards`) or --all")
     uf.add_argument("name", nargs="?")
     uf.add_argument("--all", action="store_true")
@@ -127,6 +178,8 @@ def main(argv: list[str] | None = None) -> None:
         from . import run as run_mod
 
         sys.exit(run_mod.stop_all())
+    if args.cmd == "gateway":
+        sys.exit(_gateway_cmd(args))
     if args.cmd in ("forward", "forwards", "unforward"):
         sys.exit(_forward_cmd(args))
     if args.cmd == "ca-path":
@@ -155,6 +208,10 @@ def main(argv: list[str] | None = None) -> None:
             threading.Thread(target=vm.build_all_base_images, daemon=True).start()
         if vm.network_mode == "bastion":
             vm.ensure_bastion()
+        try:
+            vm.ensure_gateway(gateway_ports_wanted())
+        except Exception as e:  # noqa: BLE001 - the gateway is optional
+            LOG.warning("HTTP gateway not started: %s", e)
         from . import imds
 
         imds.start(vm)

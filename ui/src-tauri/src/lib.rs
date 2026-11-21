@@ -235,6 +235,28 @@ async fn forward_remove(state: State<'_, AppState>, name: String) -> Result<(), 
         .map_err(|e| e.to_string())?
 }
 
+// ---------------------------------------------------------------- HTTP gateway
+
+/// Ports the HTTP gateway listens on (http://<name>.localhost[:port]).
+#[tauri::command]
+async fn gateway_list(state: State<'_, AppState>) -> Result<Value, String> {
+    let dir = ec2sim_dir(&state);
+    let out = tauri::async_runtime::spawn_blocking(move || cli::output(&dir, &["gateway", "list", "--json"]))
+        .await
+        .map_err(|e| e.to_string())??;
+    let json = out.lines().rev().find(|l| l.trim_start().starts_with('{')).unwrap_or("{\"ports\":[]}");
+    serde_json::from_str(json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn gateway_set_port(state: State<'_, AppState>, port: u16, enabled: bool) -> Result<(), String> {
+    let dir = ec2sim_dir(&state);
+    let action = if enabled { "add-port" } else { "remove-port" };
+    tauri::async_runtime::spawn_blocking(move || cli::output(&dir, &["gateway", action, &port.to_string()]).map(|_| ()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = settings::load();
@@ -267,6 +289,8 @@ pub fn run() {
             forward_add,
             forward_list,
             forward_remove,
+            gateway_list,
+            gateway_set_port,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the ec2-sim UI")

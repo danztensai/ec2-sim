@@ -2,14 +2,14 @@
 import { useEffect, useState } from "react";
 import { Camera, ExternalLink, Plug, RefreshCw, SquareTerminal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, createImage, defaultUser, Instance, instanceAction } from "../api";
+import { api, createImage, defaultUser, Instance, instanceAction, webName, webUrl } from "../api";
 import { useStore } from "../store";
 import { Button, CopyField, Field, Modal, Spinner, useToast } from "../ui";
 
 export function ConnectDialog({ instance, onClose }: { instance: Instance; onClose: () => void }) {
   const { status, keys, imageById } = useStore();
   const toast = useToast();
-  const [tab, setTab] = useState<"shell" | "ssh">("shell");
+  const [tab, setTab] = useState<"shell" | "ssh" | "web">("shell");
   const [shellCmd, setShellCmd] = useState("");
   const [user, setUser] = useState(defaultUser(imageById(instance.imageId)));
   const keyPath = keys.find((k) => k.name === instance.keyName)?.localPath;
@@ -44,8 +44,13 @@ export function ConnectDialog({ instance, onClose }: { instance: Instance; onClo
         <button className={tab === "ssh" ? "active" : ""} onClick={() => setTab("ssh")}>
           SSH
         </button>
+        <button className={tab === "web" ? "active" : ""} onClick={() => setTab("web")}>
+          Browser
+        </button>
       </div>
-      {tab === "shell" ? (
+      {tab === "web" ? (
+        <WebAccess instance={instance} />
+      ) : tab === "shell" ? (
         <div className="stack">
           <p className="muted">
             Opens a root shell inside the instance with <code>docker exec</code>. Fastest way in; no key pair or network needed.
@@ -302,5 +307,64 @@ export function ForwardDialog({ instance, onClose, onCreated }: { instance: Inst
         </div>
       )}
     </Modal>
+  );
+}
+
+/** http://<name>.localhost[:port] links through ec2-sim's HTTP gateway. */
+function WebAccess({ instance }: { instance: Instance }) {
+  const toast = useToast();
+  const [ports, setPorts] = useState<number[] | null>(null);
+  const [newPort, setNewPort] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => api.gatewayList().then((g) => setPorts(g.ports)).catch(() => setPorts([]));
+  useEffect(() => {
+    load();
+  }, []);
+  const named = webName(instance) !== instance.id;
+
+  async function addPort() {
+    const p = Number(newPort);
+    if (!(p > 0 && p < 65536)) return;
+    setBusy(true);
+    try {
+      await api.gatewaySetPort(p, true);
+      setNewPort("");
+      await load();
+    } catch (e) {
+      toast("error", String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (ports === null) return <Spinner label="Checking the HTTP gateway…" />;
+  return (
+    <div className="stack">
+      <p className="muted">
+        Open web apps on this instance from your browser by name. <code>*.localhost</code> resolves to your own computer in browsers and curl
+        (Windows, macOS, Linux); ec2-sim's gateway routes it to the instance{named ? " by its Name tag" : ""}.
+      </p>
+      {!named && <div className="callout info">Give the instance a Name tag (e.g. app1) for a friendlier address; the instance ID works too.</div>}
+      {ports.length === 0 && <div className="callout warn">The HTTP gateway isn't running (restart the server, or host port 80 may be busy). Add a port below.</div>}
+      {ports.map((p) => (
+        <div key={p} className="web-row">
+          <CopyField value={webUrl(instance, p)} label={`Instance port ${p}`} />
+          <Button icon={<ExternalLink size={16} />} onClick={() => openUrl(webUrl(instance, p))}>
+            Open
+          </Button>
+        </div>
+      ))}
+      <div className="grid-2">
+        <Field label="Another port" hint="Adds a gateway port for every instance (e.g. 9404 → http://name.localhost:9404)">
+          <input type="number" min={1} max={65535} value={newPort} onChange={(e) => setNewPort(e.target.value)} placeholder="9404" />
+        </Field>
+        <div style={{ alignSelf: "center" }}>
+          <Button icon={<Plug size={16} />} busy={busy} disabled={!newPort} onClick={addPort}>
+            Add port
+          </Button>
+        </div>
+      </div>
+      <p className="muted small">The app must listen on 0.0.0.0 (not only 127.0.0.1) inside the instance. For databases and other non-HTTP ports use ⋯ → Port forward.</p>
+    </div>
   );
 }

@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -f /etc/ssh/ssh_host_* \
  && systemctl mask getty@tty1.service console-getty.service systemd-logind.service \
       sys-kernel-config.mount sys-kernel-debug.mount systemd-remount-fs.service systemd-modules-load.service \
+ && systemctl mask systemd-binfmt.service proc-sys-fs-binfmt_misc.automount proc-sys-fs-binfmt_misc.mount \
  && systemctl enable ssh.service
 COPY common/ec2sim-boot common/ec2sim-userdata /usr/local/sbin/
 COPY common/ec2sim-userdata.service /etc/systemd/system/
