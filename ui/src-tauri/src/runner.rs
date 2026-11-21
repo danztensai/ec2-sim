@@ -147,3 +147,27 @@ impl Runner {
         }
     }
 }
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// Through wsl.exe + `ec2-sim run`: the value reaches the runner via WSLENV
+    /// (not the command line) with quotes/spaces intact. Needs ec2-sim running.
+    /// Run on Windows: cargo test -- --ignored runner_
+    #[test]
+    #[ignore]
+    fn runner_passes_secret_via_env() {
+        host::configure("wsl", "");
+        let dir = option_env!("EC2SIM_DEFAULT_DIR").unwrap_or("~/tools/ec2-sim");
+        let secret = r#"s3cr3t 'quoted' "x" $HOME"#;
+        let mut c = build(dir, "/tmp", r#"printf '%s\n' "$MY_SECRET"; echo "key=$AWS_ACCESS_KEY_ID""#, "us-west-2",
+                          &[("MY_SECRET".into(), secret.into())]).unwrap();
+        let out = c.output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.lines().any(|l| l == secret), "secret not passed intact:\n{text}\n{}", String::from_utf8_lossy(&out.stderr));
+        assert!(text.contains("key=test"), "runner must only have fake AWS credentials:\n{text}");
+        // The value must not appear on the wsl.exe command line (args), only in the env.
+        assert!(!c.get_args().any(|a| a.to_string_lossy().contains("s3cr3t")));
+    }
+}
