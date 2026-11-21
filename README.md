@@ -240,6 +240,20 @@ Scripts must have LF line endings: on Windows, run them from a checkout inside W
   ```
 
   The name is the instance's **Name tag** (lowercased) or its instance ID.
+
+  **Who can be reached** follows security groups, like a public instance on AWS:
+  `name:PORT` works only if one of the instance's security groups allows
+  inbound TCP on PORT (or all traffic) **from an IP range** (e.g. `0.0.0.0/0`).
+  Group-to-group rules don't count (they're instance-to-instance). Otherwise
+  the gateway answers 403 saying what to open. Changes apply within ~2 s:
+
+  ```bash
+  aws ec2 authorize-security-group-ingress --group-id sg-… --protocol tcp --port 80 --cidr 0.0.0.0/0
+  ```
+
+  A tag `ec2sim:web = 80,9404` (or `all` / `none`) overrides the groups for that
+  instance. `EC2SIM_GATEWAY_ACCESS=open` lets everything through. Port forwards
+  are not filtered (they're an explicit action from your machine).
   `*.localhost` resolves to your own machine in browsers and curl on Windows,
   macOS and Linux, so no DNS or hosts-file setup is needed. Apps must listen on
   `0.0.0.0`. For bare names (`http://app2:9404`) add hosts-file entries pointing
@@ -280,6 +294,7 @@ docker images ec2sim/ami                            # AMIs you've baked
 ```bash
 ./tests/smoke.sh            # AWS CLI: run → user data → SSH → bake → CreateImage → relaunch → deregister
 ./tests/e2e/run-packer.sh   # Packer amazon-ebs build of an nginx AMI
+uv run pytest -q tests/unit # unit tests (no server needed)
 ```
 
 Both expect a running server on `localhost:4566`. In bastion mode, run them with
@@ -304,6 +319,7 @@ Both expect a running server on `localhost:4566`. In bastion mode, run them with
 | `EC2SIM_IMDS_BIND` | `127.0.0.1` | IMDS backend bind address in bastion mode |
 | `EC2SIM_GATEWAY_PORTS` | `80` | HTTP gateway ports (`""` = off); more via `ec2-sim gateway add-port` |
 | `EC2SIM_GATEWAY_BIND` | `127.0.0.1` | address the gateway publishes on |
+| `EC2SIM_GATEWAY_ACCESS` | `security-groups` | `security-groups` (inbound rules / `ec2sim:web` tag decide) or `open` |
 
 Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
 (remove stray instance containers and networks, keep AMIs), `ec2-sim ca-path`.
@@ -322,7 +338,8 @@ Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
   no Windows AMIs.
 - The public IP is the container's subnet IP: reachable from the host with
   native Docker/OrbStack, and through the bastion on Docker Desktop.
-- Security groups are recorded but not enforced.
+- Security groups control access through the HTTP gateway only; traffic between
+  instances and port forwards are not filtered.
 - AMI tags and EBS volumes/snapshots are metadata only: not restored after a
   restart and not captured by `CreateImage`.
 - Instance-profile credentials are random strings: accepted by ec2-sim, not by

@@ -296,3 +296,9 @@ td > .copy-text { color: var(--text); }
 .forward-row:first-of-type { border-top: 0; }
 
 .web-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+
+.web-port { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.access { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.access.ok { color: var(--success); }
+.access.no { color: var(--warn); }
+.chip-input { width: 110px; border-radius: 99px; padding: 4px 11px; font-size: 12.5px; }

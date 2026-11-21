@@ -59,6 +59,11 @@ IMDS_BIND = os.environ.get("EC2SIM_IMDS_BIND", "127.0.0.1")
 GATEWAY_PORTS = os.environ.get("EC2SIM_GATEWAY_PORTS", "80")
 GATEWAY_BIND = os.environ.get("EC2SIM_GATEWAY_BIND", "127.0.0.1")
 GATEWAY_PORTS_FILE = Path.home() / ".ec2-sim" / "gateway-ports"
+# Who the gateway lets through:
+#   security-groups - instance:PORT only if one of its security groups allows
+#                     inbound TCP PORT from an IP range (or tag ec2sim:web=PORT,...)
+#   open            - every instance on every gateway port
+GATEWAY_ACCESS = os.environ.get("EC2SIM_GATEWAY_ACCESS", "security-groups").strip().lower()
 
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
 

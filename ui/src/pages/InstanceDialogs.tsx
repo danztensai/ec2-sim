@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Camera, ExternalLink, Plug, RefreshCw, SquareTerminal } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, createImage, defaultUser, Instance, instanceAction, webName, webUrl } from "../api";
+import { allowPort, api, createImage, defaultUser, describeSecurityGroups, Instance, instanceAction, portAccess, revokePort, SecurityGroup, webName, webUrl } from "../api";
 import { useStore } from "../store";
 import { Button, CopyField, Field, Modal, Spinner, useToast } from "../ui";
 
@@ -313,13 +313,42 @@ export function ForwardDialog({ instance, onClose, onCreated }: { instance: Inst
 /** http://<name>.localhost[:port] links through ec2-sim's HTTP gateway. */
 function WebAccess({ instance }: { instance: Instance }) {
   const toast = useToast();
+  const { instances, refresh } = useStore();
   const [ports, setPorts] = useState<number[] | null>(null);
+  const [mode, setMode] = useState("security-groups");
+  const [groups, setGroups] = useState<SecurityGroup[]>([]);
   const [newPort, setNewPort] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () => api.gatewayList().then((g) => setPorts(g.ports)).catch(() => setPorts([]));
+  const load = async () => {
+    try {
+      const g = await api.gatewayList();
+      setPorts(g.ports);
+      setMode(g.access ?? "security-groups");
+    } catch {
+      setPorts([]);
+    }
+    setGroups(await describeSecurityGroups(instance.groups.map((g) => g.id)).catch(() => []));
+  };
   useEffect(() => {
     load();
   }, []);
+  const target = instance.groups[0];
+  const shared = target ? instances.filter((i) => i.id !== instance.id && i.state !== "terminated" && i.groups.some((g) => g.id === target.id)).length : 0;
+
+  async function change(port: number, allow: boolean) {
+    if (!target) return;
+    setBusy(true);
+    try {
+      await (allow ? allowPort(target.id, port) : revokePort(target.id, port));
+      toast("success", `${allow ? "Allowed" : "Revoked"} TCP ${port} in ${target.name || target.id}`);
+      await load();
+      await refresh();
+    } catch (e) {
+      toast("error", String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   const named = webName(instance) !== instance.id;
 
   async function addPort() {
@@ -346,14 +375,32 @@ function WebAccess({ instance }: { instance: Instance }) {
       </p>
       {!named && <div className="callout info">Give the instance a Name tag (e.g. app1) for a friendlier address; the instance ID works too.</div>}
       {ports.length === 0 && <div className="callout warn">The HTTP gateway isn't running (restart the server, or host port 80 may be busy). Add a port below.</div>}
-      {ports.map((p) => (
-        <div key={p} className="web-row">
-          <CopyField value={webUrl(instance, p)} label={`Instance port ${p}`} />
-          <Button icon={<ExternalLink size={16} />} onClick={() => openUrl(webUrl(instance, p))}>
-            Open
-          </Button>
+      {ports.map((p) => {
+        const a = portAccess(instance, groups, p, mode);
+        return (
+          <div key={p} className="web-port">
+            <div className="web-row">
+              <CopyField value={webUrl(instance, p)} label={`Instance port ${p}`} />
+              <Button icon={<ExternalLink size={16} />} disabled={!a.allowed} onClick={() => openUrl(webUrl(instance, p))}>
+                Open
+              </Button>
+            </div>
+            <div className={`access ${a.allowed ? "ok" : "no"}`}>
+              {a.allowed ? "✅ Allowed" : "🚫 Blocked"} <span className="muted">— {a.via}</span>
+              {mode !== "open" && instance.tags["ec2sim:web"] === undefined && target && (
+                <Button size="sm" variant="ghost" busy={busy} onClick={() => change(p, !a.allowed)}>
+                  {a.allowed ? "Revoke" : `Allow TCP ${p} in ${target.name || target.id}`}
+                </Button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {mode !== "open" && shared > 0 && (
+        <div className="muted small">
+          Allow/Revoke edits security group <b>{target?.name || target?.id}</b>, which {shared} other instance{shared > 1 ? "s" : ""} also use.
         </div>
-      ))}
+      )}
       <div className="grid-2">
         <Field label="Another port" hint="Adds a gateway port for every instance (e.g. 9404 → http://name.localhost:9404)">
           <input type="number" min={1} max={65535} value={newPort} onChange={(e) => setNewPort(e.target.value)} placeholder="9404" />

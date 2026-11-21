@@ -116,32 +116,61 @@ class DockerVMManager:
             return None
 
     @staticmethod
-    def gateway_conf(ports: list[int]) -> str:
-        """nginx: <name>.localhost:P -> <name>:P, names resolved by Docker DNS
-        (instance Name tag / instance ID aliases on the VPC networks)."""
+    def gateway_conf(ports: list[int], allowed: set[str] | None) -> str:
+        """nginx: <name>.localhost:P -> <name>:P (names resolved by Docker DNS:
+        instance Name tag / instance ID aliases on the VPC networks).
+        `allowed` = {"name:port", ...}; None means open to every instance."""
+        def q(x: str) -> str:
+            return '"' + x.replace('"', "") + '"'
+        entries = " ".join(f"{q(a)} 1;" for a in sorted(allowed or ()))
+        default = "1" if allowed is None else "0"
         servers = []
         for p in ports:
             servers.append(
                 f"server {{ listen {p}; server_name ~^(?<inst>[a-z0-9][a-z0-9-]*)\\.localhost$; "
-                f"location / {{ proxy_pass http://$inst:{p}; proxy_http_version 1.1; "
+                "location / { default_type text/plain; if ($ec2sim_allowed = 0) { "
+                f"return 403 'ec2-sim gateway: port {p} on \"$inst\" is not open. Allow inbound TCP {p} "
+                "in one of its security groups (or tag the instance ec2sim:web), or check the name.\\n'; } "
+                f"proxy_pass http://$inst:{p}; proxy_http_version 1.1; "
                 "proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; "
                 "proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; "
                 "proxy_set_header Connection $connection_upgrade; proxy_read_timeout 3600s; "
                 "proxy_intercept_errors off; error_page 502 504 = @noinst; } "
                 f"location @noinst {{ default_type text/plain; return 502 'ec2-sim gateway: nothing answering at "
-                f"instance \"$inst\" port {p} (is the instance running, named \"$inst\" (Name tag or ID), "
-                "and listening on 0.0.0.0?)\\n'; } } "
+                f"instance \"$inst\" port {p} (is it running and listening on 0.0.0.0?)\\n'; }} }} "
                 f"server {{ listen {p} default_server; default_type text/plain; "
                 f"return 404 'ec2-sim gateway: use http://<instance-name>.localhost:{p}/ "
                 "(instance Name tag or instance ID)\\n'; }"
             )
         return ("resolver 127.0.0.11 valid=5s ipv6=off; "
-                "map $http_upgrade $connection_upgrade { default upgrade; '' close; } " + " ".join(servers))
+                "map $http_upgrade $connection_upgrade { default upgrade; '' close; } "
+                f"map \"$inst:$server_port\" $ec2sim_allowed {{ default {default}; {entries} }} "
+                + " ".join(servers))
+
+    def update_gateway_access(self, allowed: set[str] | None) -> bool:
+        """Rewrite the gateway's allow-map and reload nginx if it changed."""
+        g = self._gateway()
+        if g is None:
+            return False
+        key = (g.id, None if allowed is None else frozenset(allowed))
+        if getattr(self, "_gw_access_key", None) == key:
+            return False
+        conf = self.gateway_conf(self.gateway_ports(), allowed)
+        res = g.exec_run(["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/conf.d/default.conf && nginx -s reload"],
+                         environment={"GW_CONF": conf})
+        if res.exit_code != 0:
+            LOG.warning("gateway reload failed: %s", res.output.decode(errors="replace").strip())
+            return False
+        self._gw_access_key = key
+        return True
 
     def ensure_gateway(self, ports: list[int]) -> list[int]:
         """(Re)create the gateway publishing `ports` on GATEWAY_BIND; returns the ports
         actually published (ports already in use on the host are skipped)."""
+        mode = config.GATEWAY_ACCESS
         if (g := self._gateway()) is not None:
+            # Keep the mode the server chose (CLI calls may run with other env).
+            mode = g.labels.get(_label("gateway_access")) or mode
             g.remove(force=True)
         ports = sorted(set(p for p in ports if 0 < p < 65536))
         if not ports:
@@ -158,9 +187,10 @@ class DockerVMManager:
                     ["sh", "-c", "printf '%s' \"$GW_CONF\" > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"],
                     name=self.GATEWAY,
                     detach=True,
-                    environment={"GW_CONF": self.gateway_conf(published)},
+                    environment={"GW_CONF": self.gateway_conf(published, None if mode == "open" else set())},
                     ports={f"{p}/tcp": (config.GATEWAY_BIND, p) for p in published},
-                    labels={_label("gateway"): "true", _label("gateway_ports"): ",".join(map(str, published))},
+                    labels={_label("gateway"): "true", _label("gateway_ports"): ",".join(map(str, published)),
+                            _label("gateway_access"): mode},
                 )
                 break
             except APIError as e:

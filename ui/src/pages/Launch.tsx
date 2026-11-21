@@ -1,7 +1,7 @@
 // "Launch instance" wizard, available from every page via useLaunch().
 import { createContext, ReactNode, useContext, useMemo, useState } from "react";
 import { Disc3, KeyRound, Rocket } from "lucide-react";
-import { createKeyPair, friendlyImageName, Image, runInstances } from "../api";
+import { createKeyPair, createWebGroup, friendlyImageName, Image, runInstances } from "../api";
 import { useStore } from "../store";
 import { Button, Field, Modal, Tag, useToast } from "../ui";
 
@@ -78,6 +78,8 @@ function LaunchModal({ initialImage, onClose }: { initialImage?: string; onClose
   const [keyName, setKeyName] = useState(keys[0]?.name ?? "");
   const [newKey, setNewKey] = useState("");
   const [userData, setUserData] = useState("");
+  const [webPorts, setWebPorts] = useState<number[]>([80]);
+  const [customPort, setCustomPort] = useState("");
   const [busy, setBusy] = useState(false);
 
   const creatingKey = keyName === "__new__";
@@ -92,7 +94,9 @@ function LaunchModal({ initialImage, onClose }: { initialImage?: string; onClose
         toast("success", `Key pair saved to ${path}`);
         key = newKey;
       }
-      const ids = await runInstances({ imageId, type, count, name, keyName: key, userData });
+      // Web access = a security group allowing those ports (like AWS); the gateway follows it.
+      const securityGroupIds = webPorts.length ? [await createWebGroup(name, webPorts)] : undefined;
+      const ids = await runInstances({ imageId, type, count, name, keyName: key, userData, securityGroupIds });
       toast("success", `Launched ${ids.join(", ")}`);
       await refresh();
       onClose();
@@ -189,7 +193,47 @@ function LaunchModal({ initialImage, onClose }: { initialImage?: string; onClose
 
       <section className="wizard-step">
         <h3>
-          <span className="step-num">4</span> User data <span className="muted small">(optional script run on first boot)</span>
+          <span className="step-num">4</span> Web access <span className="muted small">(open in your browser as http://{(name || "name").toLowerCase().replace(/[^a-z0-9-]/g, "-")}.localhost)</span>
+        </h3>
+        <div className="template-row">
+          {[80, 443, 8080, 3000, ...webPorts.filter((p) => ![80, 443, 8080, 3000].includes(p))].map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={`chip ${webPorts.includes(p) ? "active" : ""}`}
+              onClick={() => setWebPorts((w) => (w.includes(p) ? w.filter((x) => x !== p) : [...w, p].sort((a, b) => a - b)))}
+            >
+              {webPorts.includes(p) ? "✓ " : ""}
+              {p}
+            </button>
+          ))}
+          <input
+            className="chip-input"
+            type="number"
+            min={1}
+            max={65535}
+            placeholder="other port"
+            value={customPort}
+            onChange={(e) => setCustomPort(e.target.value)}
+            onKeyDown={(e) => {
+              const v = Number(customPort);
+              if (e.key === "Enter" && v > 0 && v < 65536) {
+                setWebPorts((w) => [...new Set([...w, v])].sort((a, b) => a - b));
+                setCustomPort("");
+              }
+            }}
+          />
+        </div>
+        <span className="field-hint">
+          {webPorts.length
+            ? `Creates a security group allowing TCP ${webPorts.join(", ")}. Ports other than 80 also need adding to the gateway (Connect → Browser).`
+            : "None: the instance gets the default security group and isn't reachable through the gateway (port forwards still work)."}
+        </span>
+      </section>
+
+      <section className="wizard-step">
+        <h3>
+          <span className="step-num">5</span> User data <span className="muted small">(optional script run on first boot)</span>
         </h3>
         <div className="template-row">
           {USER_DATA_TEMPLATES.map((t) => (

@@ -36,6 +36,7 @@ export type Instance = {
   launchTime: string;
   az: string;
   tags: Record<string, string>;
+  groups: { id: string; name: string }[];
 };
 
 export type Image = {
@@ -79,7 +80,7 @@ export const api = {
     invoke<string>("forward_add", { instanceId, remotePort, localPort }),
   forwardList: () => invoke<Forward[]>("forward_list"),
   forwardRemove: (name: string) => invoke<void>("forward_remove", { name }),
-  gatewayList: () => invoke<{ ports: number[]; bind: string }>("gateway_list"),
+  gatewayList: () => invoke<{ ports: number[]; bind: string; access?: string }>("gateway_list"),
   gatewaySetPort: (port: number, enabled: boolean) => invoke<void>("gateway_set_port", { port, enabled }),
 };
 
@@ -125,6 +126,7 @@ export async function describeInstances(): Promise<Instance[]> {
         launchTime: i.launchTime ?? "",
         az: i.placement?.availabilityZone ?? "",
         tags,
+        groups: arr(i.groupSet).map((g) => ({ id: g.groupId, name: g.groupName ?? "" })),
       });
     }
   }
@@ -186,6 +188,7 @@ export async function runInstances(opts: {
   name: string;
   keyName: string;
   userData: string;
+  securityGroupIds?: string[];
 }): Promise<string[]> {
   const p: Params = {
     ImageId: opts.imageId,
@@ -194,6 +197,7 @@ export async function runInstances(opts: {
     MaxCount: String(opts.count),
   };
   if (opts.keyName) p.KeyName = opts.keyName;
+  (opts.securityGroupIds ?? []).forEach((g, n) => (p[`SecurityGroupId.${n + 1}`] = g));
   if (opts.userData.trim()) p.UserData = toBase64(opts.userData);
   if (opts.name.trim()) {
     p["TagSpecification.1.ResourceType"] = "instance";
@@ -258,3 +262,64 @@ export function webName(i: Instance): string {
 }
 
 export const webUrl = (i: Instance, port: number) => `http://${webName(i)}.localhost${port === 80 ? "" : `:${port}`}/`;
+
+// ------------------------------------------------------------------ web access (security groups)
+
+export type SgRule = { protocol: string; from: number | null; to: number | null; cidrs: string[] };
+export type SecurityGroup = { id: string; name: string; rules: SgRule[] };
+
+export async function describeSecurityGroups(ids: string[]): Promise<SecurityGroup[]> {
+  if (!ids.length) return [];
+  const r = await api.ec2("DescribeSecurityGroups", list("GroupId", ids));
+  return arr(r.securityGroupInfo).map((g) => ({
+    id: g.groupId,
+    name: g.groupName ?? "",
+    rules: arr(g.ipPermissions).map((p) => ({
+      protocol: String(p.ipProtocol ?? ""),
+      from: p.fromPort != null && p.fromPort !== "" ? Number(p.fromPort) : null,
+      to: p.toPort != null && p.toPort !== "" ? Number(p.toPort) : null,
+      cidrs: [...arr(p.ipRanges).map((x) => x.cidrIp), ...arr(p.ipv6Ranges).map((x) => x.cidrIpv6)].filter(Boolean),
+    })),
+  }));
+}
+
+/** Same rule as ec2-sim's gateway: TCP (or all traffic) covering the port, from an IP range. */
+export function ruleAllows(rule: SgRule, port: number): boolean {
+  if (!rule.cidrs.length) return false;
+  if (rule.protocol === "-1" || rule.protocol === "all") return true;
+  if (rule.protocol !== "tcp" && rule.protocol !== "6") return false;
+  return rule.from != null && rule.to != null && rule.from <= port && port <= rule.to;
+}
+
+export const WEB_TAG = "ec2sim:web";
+
+/** Why a port is (not) reachable through the gateway. */
+export function portAccess(i: Instance, groups: SecurityGroup[], port: number, mode: string): { allowed: boolean; via: string } {
+  if (mode === "open") return { allowed: true, via: "gateway access is open" };
+  const tag = i.tags[WEB_TAG];
+  if (tag !== undefined) {
+    const t = tag.trim().toLowerCase();
+    const ok = t === "all" || t === "*" || t.split(",").map((x) => x.trim()).includes(String(port));
+    return { allowed: ok, via: `tag ${WEB_TAG}=${tag}` };
+  }
+  const g = groups.find((g) => g.rules.some((r) => ruleAllows(r, port)));
+  return g ? { allowed: true, via: `security group ${g.name || g.id}` } : { allowed: false, via: "no security group allows it" };
+}
+
+const tcpPerm = (port: number): Params => ({
+  "IpPermissions.1.IpProtocol": "tcp",
+  "IpPermissions.1.FromPort": String(port),
+  "IpPermissions.1.ToPort": String(port),
+  "IpPermissions.1.IpRanges.1.CidrIp": "0.0.0.0/0",
+});
+
+export const allowPort = (groupId: string, port: number) => api.ec2("AuthorizeSecurityGroupIngress", { GroupId: groupId, ...tcpPerm(port) });
+export const revokePort = (groupId: string, port: number) => api.ec2("RevokeSecurityGroupIngress", { GroupId: groupId, ...tcpPerm(port) });
+
+/** A security group (default VPC) allowing TCP `ports` from anywhere; returns its ID. */
+export async function createWebGroup(label: string, ports: number[]): Promise<string> {
+  const name = `web-${(label || "instance").toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${Date.now().toString(36)}`;
+  const r = await api.ec2("CreateSecurityGroup", { GroupName: name, GroupDescription: `ec2-sim web access: ${ports.join(", ")}` });
+  for (const p of ports) await allowPort(r.groupId, p);
+  return r.groupId;
+}

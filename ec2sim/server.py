@@ -84,7 +84,9 @@ def _gateway_cmd(args) -> int:
     if args.json:
         import json as _json
 
-        print(_json.dumps({"ports": ports, "bind": config.GATEWAY_BIND}))
+        g = vm._gateway()
+        mode = (g.labels.get(f"{config.LABEL}.gateway_access") if g else None) or config.GATEWAY_ACCESS
+        print(_json.dumps({"ports": ports, "bind": config.GATEWAY_BIND, "access": mode}))
     elif ports:
         for p in ports:
             print(f"http://<instance-name>.localhost{'' if p == 80 else f':{p}'}/  ->  instance port {p}")
@@ -210,6 +212,9 @@ def main(argv: list[str] | None = None) -> None:
             vm.ensure_bastion()
         try:
             vm.ensure_gateway(gateway_ports_wanted())
+            from . import access
+
+            access.start_sync(vm)
         except Exception as e:  # noqa: BLE001 - the gateway is optional
             LOG.warning("HTTP gateway not started: %s", e)
         from . import imds
