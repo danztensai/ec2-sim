@@ -71,6 +71,7 @@ jobs:
           - os: windows-latest
             args: ""
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -147,9 +148,10 @@ jobs:
           gh api -X PATCH "repos/$REPO/releases/$ID" -F draft=false -f make_latest=true --jq .html_url
 
   cleanup:
-    # A build failed: delete the draft so it doesn't pile up (the run's logs keep the details).
+    # A build failed or was cancelled (e.g. GitHub had no macOS runner free):
+    # delete the draft so it doesn't pile up. The run's logs keep the details.
     needs: [draft, build]
-    if: failure() && needs.draft.outputs.release_id != ''
+    if: (failure() || cancelled()) && needs.draft.outputs.release_id != ''
     runs-on: ubuntu-latest
     steps:
       - env:
