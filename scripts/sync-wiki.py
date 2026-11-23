@@ -57,7 +57,7 @@ def build(out: Path) -> None:
         (out / f"{PAGES[md.name]}.md").write_text(rewrite(md.read_text()))
     side = ["**[ec2-sim](https://github.com/%s)**" % REPO, ""]
     order = ["README.md", "why-ec2-sim.md", "getting-started.md", "desktop-app.md", "baking-amis.md",
-             "networking.md", "multi-tier-testing.md", "troubleshooting.md", "architecture.md"]
+             "networking.md", "stacks.md", "multi-tier-testing.md", "troubleshooting.md", "architecture.md"]
     for name in order + sorted(set(PAGES) - set(order)):
         if name in PAGES:
             label = PAGES[name].replace("-", " ").replace("ec2 sim", "ec2-sim").replace("Multi tier", "Multi-tier")
