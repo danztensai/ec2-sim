@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { api } from "../api";
 import { Save } from "lucide-react";
 import type { Settings } from "../api";
 import { useStore } from "../store";
@@ -11,6 +12,13 @@ export default function SettingsPage() {
   const toast = useToast();
   const [form, setForm] = useState<Settings | null>(settings);
   useEffect(() => setForm(settings), [settings]);
+  // Which ec2-sim the folder resolves to: a checkout, or the managed install.
+  const [source, setSource] = useState("");
+  const dir = form?.ec2sim_dir ?? "";
+  useEffect(() => {
+    const t = setTimeout(() => api.serverSource(dir).then(setSource, () => setSource("")), 300);
+    return () => clearTimeout(t);
+  }, [dir]);
   if (!form) return null;
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setForm({ ...form, [k]: v });
@@ -45,14 +53,21 @@ export default function SettingsPage() {
           </Field>
         )}
         <Field
-          label="ec2-sim folder"
+          label="ec2-sim folder (optional)"
           hint={
-            status?.via_wsl
-              ? "Path inside WSL, e.g. ~/tools/ec2-sim (the folder with pyproject.toml)."
-              : "The ec2-sim checkout this app starts (the folder with pyproject.toml)."
+            <>
+              {status?.via_wsl ? "A checkout inside WSL, e.g. ~/tools/ec2-sim. " : "A git checkout of ec2-sim (the folder with pyproject.toml). "}
+              Leave it empty, or point it anywhere else, and the app installs the matching ec2-sim version itself with uv.
+              {source && (
+                <>
+                  <br />
+                  Using: <code>{source}</code>
+                </>
+              )}
+            </>
           }
         >
-          <input value={form.ec2sim_dir} onChange={(e) => set("ec2sim_dir", e.target.value)} spellCheck={false} />
+          <input value={form.ec2sim_dir} onChange={(e) => set("ec2sim_dir", e.target.value)} placeholder="empty: managed install" spellCheck={false} />
         </Field>
         <Field label="API endpoint">
           <input value={form.endpoint} onChange={(e) => set("endpoint", e.target.value)} spellCheck={false} />

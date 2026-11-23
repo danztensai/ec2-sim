@@ -27,3 +27,7 @@ packages = ["ec2sim"]
 dev = [
     "pytest>=9.2.0",
 ]
+
+[tool.hatch.build.targets.sdist]
+# The desktop app (ui/, with node_modules and Rust build output) isn't part of the Python package.
+include = ["ec2sim", "tests", "examples", "README.md", "LICENSE", "NOTICE"]

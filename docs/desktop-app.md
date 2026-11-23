@@ -16,6 +16,12 @@ The easiest way: download the installer for your OS from
 The app isn't code-signed yet: on macOS, right-click → **Open** the first time. On
 Windows, choose **More info → Run anyway** if SmartScreen warns.
 
+The installed app needs Docker and [uv](https://docs.astral.sh/uv/) (on Windows, inside
+WSL). It doesn't need a clone of this repository. On first start it installs the matching
+ec2-sim version with `uv tool install --from git+https://github.com/danztensai/ec2-sim@v<app version>`
+into `~/.ec2-sim/` (apart from your other uv tools), and reinstalls it after an app update.
+This takes about a minute. Settings shows which ec2-sim is in use.
+
 To build it yourself:
 
 | Your machine | How |
@@ -23,9 +29,10 @@ To build it yourself:
 | Windows | Build the native Windows app; it drives ec2-sim inside WSL. See [Windows with ec2-sim in WSL](../ui/README.md#windows-with-ec2-sim-in-wsl-recommended-on-windows). |
 | macOS / Linux | `cd ui && npm install && npm run tauri build`, or `npm run tauri dev`. |
 
-On first start, check **Settings**: the ec2-sim folder (a WSL path such as
-`/home/you/ec2-sim` on Windows), the region, and whether to start the server
-automatically.
+On first start, check **Settings**: the region, and whether to start the server
+automatically. **ec2-sim folder** is optional. Point it at a git checkout (a WSL path
+such as `~/tools/ec2-sim` on Windows) to run your own copy, for example while
+developing ec2-sim. Leave it empty to use the managed install.
 
 ![Settings](images/settings.png)
 

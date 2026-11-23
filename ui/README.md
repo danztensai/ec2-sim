@@ -46,6 +46,16 @@ Prebuilt installers for Linux, macOS and Windows:
 [Releases](https://github.com/danztensai/ec2-sim/releases/latest). They're built by
 `.github/workflows/release.yml` on every push to `main`. To build it yourself, see below.
 
+**Where ec2-sim comes from** (`src-tauri/src/source.rs`):
+
+- If **Settings → ec2-sim folder** is a checkout (contains `pyproject.toml`), the app runs
+  its `.venv/bin/ec2-sim`, or `uv run --project <folder> ec2-sim`.
+- Otherwise (empty, or any other folder) it uses a **managed install**:
+  `uv tool install --from git+https://github.com/danztensai/ec2-sim@v<app version> ec2-sim`
+  into `~/.ec2-sim/tools` and `~/.ec2-sim/bin`. It's reinstalled when the app version
+  changes. Set `EC2SIM_SERVER_SPEC` to install from somewhere else, e.g. a local path or
+  another git ref.
+
 ## Run it
 
 Requirements: everything ec2-sim needs (Docker, uv), plus Rust (stable) and
@@ -60,8 +70,8 @@ npm run tauri dev        # development, with hot reload
 npm run tauri build      # release build + installers in src-tauri/target/release/bundle/
 ```
 
-The app looks for ec2-sim in the repository it was built from (`ui/..`). Change
-it under **Settings → ec2-sim folder** if you move things.
+A build from source defaults to the repository it was built from (`ui/..`). Change
+it under **Settings → ec2-sim folder**, or clear the setting to use the managed install.
 
 ### Windows with ec2-sim in WSL (recommended on Windows)
 

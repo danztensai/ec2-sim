@@ -65,7 +65,9 @@ GATEWAY_PORTS_FILE = Path.home() / ".ec2-sim" / "gateway-ports"
 #   open            - every instance on every gateway port
 GATEWAY_ACCESS = os.environ.get("EC2SIM_GATEWAY_ACCESS", "security-groups").strip().lower()
 
-IMAGES_DIR = Path(__file__).resolve().parent.parent / "images"
+# Dockerfiles for the base AMIs and helper containers. Inside the package so a
+# `uv tool install` / pip install of ec2-sim can build them too.
+IMAGES_DIR = Path(__file__).resolve().parent / "images"
 
 # Prefix for every Docker object ec2-sim creates.
 PREFIX = "ec2sim"

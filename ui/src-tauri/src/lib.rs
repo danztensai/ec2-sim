@@ -7,6 +7,7 @@ mod host;
 mod runner;
 mod server;
 mod settings;
+mod source;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -257,12 +258,22 @@ async fn gateway_set_port(state: State<'_, AppState>, port: u16, enabled: bool) 
         .map_err(|e| e.to_string())?
 }
 
+/// Where ec2-sim runs from for the given folder: a checkout, or the managed install.
+#[tauri::command]
+async fn server_source(dir: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || source::describe(&dir)).await.map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial = settings::load();
     host::configure(&initial.backend, &initial.wsl_distro);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            source::set_app_version(app.package_info().version.to_string());
+            Ok(())
+        })
         .manage(AppState {
             server: Mutex::new(server::Server::default()),
             settings: Mutex::new(initial),
@@ -291,6 +302,7 @@ pub fn run() {
             forward_remove,
             gateway_list,
             gateway_set_port,
+            server_source,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the ec2-sim UI")

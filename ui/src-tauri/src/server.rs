@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -28,28 +28,10 @@ fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, app: &AppHandle, line: String) 
 }
 
 use crate::host;
+use crate::source::{self, Source};
 
 /// PID of the ec2-sim process the app started inside WSL.
 const WSL_PID_FILE: &str = "/tmp/ec2sim-ui-server.pid";
-
-fn wsl_dir(dir: &str) -> String {
-    host::wsl_path(dir)
-}
-
-/// Program + args to launch ec2-sim from its checkout.
-fn command_for(dir: &Path) -> Command {
-    #[cfg(windows)]
-    let venv_bin = dir.join(".venv").join("Scripts").join("ec2-sim.exe");
-    #[cfg(not(windows))]
-    let venv_bin = dir.join(".venv").join("bin").join("ec2-sim");
-    if venv_bin.exists() {
-        Command::new(venv_bin)
-    } else {
-        let mut c = Command::new("uv");
-        c.args(["run", "ec2-sim"]);
-        c
-    }
-}
 
 impl Server {
     pub fn is_managed(&mut self) -> bool {
@@ -69,36 +51,30 @@ impl Server {
         if self.is_managed() {
             return Ok(());
         }
+        let src = source::source(dir);
+        if src == Source::Managed {
+            let (logs, app2) = (self.logs.clone(), app.clone());
+            source::ensure_managed(&move |line| push_log(&logs, &app2, line))?;
+        }
         let mut cmd = match host::runtime() {
             host::Runtime::Native => {
-                let dir_path = Path::new(dir);
-                if !dir_path.join("pyproject.toml").exists() {
-                    return Err(format!(
-                        "'{dir}' doesn't look like an ec2-sim folder (no pyproject.toml). Set it in Settings."
-                    ));
+                let mut c = source::native_command(&src, &[]);
+                if let Source::Checkout(d) = &src {
+                    c.current_dir(Path::new(d));
                 }
-                let mut c = command_for(dir_path);
-                c.current_dir(dir_path).envs(env).env("PYTHONUNBUFFERED", "1");
-                host::hide_window(&mut c);
+                c.envs(env).env("PYTHONUNBUFFERED", "1");
                 c
             }
             host::Runtime::Wsl { .. } => {
                 // Inside WSL: record the shell's PID, then `exec` so that PID becomes ec2-sim.
-                let d = wsl_dir(dir);
-                let ok = host::sh(&format!("test -f {d}/pyproject.toml")).status().map(|s| s.success()).unwrap_or(false);
-                if !ok {
-                    return Err(format!(
-                        "'{dir}' (inside WSL) doesn't look like an ec2-sim folder (no pyproject.toml). Set it in Settings."
-                    ));
-                }
                 let envs: String = env
                     .iter()
                     .filter(|(k, _)| k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-                    .map(|(k, v)| format!("{k}={} ", host::sh_quote(v)))
+                    .map(|(k, v)| format!("export {k}={}; ", host::sh_quote(v)))
                     .collect();
                 host::sh(&format!(
-                    "cd {d} && echo $$ > {WSL_PID_FILE} && export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\" && \
-                     exec env {envs}PYTHONUNBUFFERED=1 sh -c 'if [ -x .venv/bin/ec2-sim ]; then exec .venv/bin/ec2-sim; else exec uv run ec2-sim; fi'"
+                    "echo $$ > {WSL_PID_FILE}; {envs}export PYTHONUNBUFFERED=1; {}",
+                    source::wsl_exec(&src, "")
                 ))
             }
         };
@@ -106,7 +82,10 @@ impl Server {
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("could not start ec2-sim ({e}). Is uv installed and on PATH?"))?;
-        push_log(&self.logs, app, format!("[ui] started ec2-sim (pid {}) in {dir}", child.id()));
+        push_log(&self.logs, app, format!("[ui] started ec2-sim (pid {}) from {}", child.id(), match &src {
+            Source::Checkout(d) => format!("checkout {d}"),
+            Source::Managed => format!("{} (managed)", source::spec()),
+        }));
         for stream in [
             child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
             child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),

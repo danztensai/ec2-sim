@@ -33,6 +33,11 @@ jobs:
         run: |
           uv run ec2-sim validate examples/stacks/hello/stack.yaml
           APP_AMI=ami-0ec2511b180400001 uv run ec2-sim validate examples/stacks/multi-tier/stack.yaml
+      - name: Install as a uv tool (what the desktop app does) and check the images ship
+        run: |
+          UV_TOOL_DIR=/tmp/t UV_TOOL_BIN_DIR=/tmp/b uv tool install --python '>=3.12' --from . ec2-sim
+          /tmp/b/ec2-sim validate examples/stacks/hello/stack.yaml
+          /tmp/t/ec2-sim/bin/python -I -c "from ec2sim import config; assert (config.IMAGES_DIR / 'ubuntu-24.04' / 'Dockerfile').is_file(), config.IMAGES_DIR"
 
   draft:
     needs: test

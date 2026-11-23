@@ -1,4 +1,4 @@
-"""Base AMIs that ec2-sim ships, each backed by a Docker image built from images/<dir>."""
+"""Base AMIs that ec2-sim ships, each backed by a Docker image built from ec2sim/images/<dir>."""
 
 import os
 from dataclasses import dataclass, replace
@@ -12,7 +12,7 @@ class BaseAmi:
     description: str
     owner_id: str
     owner_alias: str
-    image_dir: str  # directory under images/
+    image_dir: str  # directory under ec2sim/images/
     default_user: str
 
     @property

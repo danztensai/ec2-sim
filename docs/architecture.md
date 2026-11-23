@@ -51,7 +51,7 @@ flowchart TB
 | `ec2sim/stack.py` | `ec2-sim up/down/reset/status/validate`: parses a stack file and applies it through the EC2/IAM API (boto3), tagging everything `ec2sim:stack` |
 | `ec2sim/catalog.py` | Base AMIs and `EC2SIM_AMI_ALIASES` |
 | `ec2sim/config.py` | All `EC2SIM_*` settings |
-| `images/` | Base AMIs (`amazonlinux-2023`, `ubuntu-24.04`, `ubuntu-18.04` / `ubuntu-26.04` with systemd), `runner`, `bastion`, `forwarder`, shared init scripts |
+| `ec2sim/images/` | Base AMIs (`amazonlinux-2023`, `ubuntu-24.04`, `ubuntu-18.04` / `ubuntu-26.04` with systemd), `runner`, `bastion`, `forwarder`, shared init scripts |
 | `ui/` | Desktop app: Rust backend (`src-tauri/`), React frontend (`src/`), screenshot harness (`screenshots/`) |
 
 ## Key decisions

@@ -1,6 +1,6 @@
 """`ec2-sim run`: run a project's own scripts, unmodified, against ec2-sim.
 
-The command runs in a disposable runner container (images/runner: Packer +
+The command runs in a disposable runner container (ec2sim/images/runner: Packer +
 Amazon plugin, AWS CLI v2, jq, sudo, ...) with:
 
 - the working directory mounted at the same path, so relative paths and log

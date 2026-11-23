@@ -80,7 +80,7 @@ uv run ec2-sim run -C ~/work/infra --region us-west-2 \
   -e VAULT_ROLE_ID -e VAULT_SECRET_ID -- './build-ami.sh --env staging'
 ```
 
-`ec2-sim run` starts a disposable **runner container** (`images/runner`) with:
+`ec2-sim run` starts a disposable **runner container** (`ec2sim/images/runner`) with:
 
 | | |
 |---|---|

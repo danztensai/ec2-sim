@@ -82,6 +82,7 @@ export const api = {
   forwardRemove: (name: string) => invoke<void>("forward_remove", { name }),
   gatewayList: () => invoke<{ ports: number[]; bind: string; access?: string }>("gateway_list"),
   gatewaySetPort: (port: number, enabled: boolean) => invoke<void>("gateway_set_port", { port, enabled }),
+  serverSource: (dir: string) => invoke<string>("server_source", { dir }),
 };
 
 // ------------------------------------------------------------------ helpers

@@ -61,8 +61,11 @@ Apple Silicon) and Windows (`.msi`, `-setup.exe`) are on the
   `xattr -cr /Applications/ec2-sim.app`.
 - **Windows:** SmartScreen may warn; choose **More info → Run anyway**.
 
-The app drives ec2-sim from a checkout of this repository (Settings → ec2-sim folder),
-so you still need the CLI requirements below.
+The app needs **Docker** and **[uv](https://docs.astral.sh/uv/)** (inside WSL on
+Windows). You don't need to clone this repository: on first start the app installs
+the ec2-sim version that matches its release with `uv tool install` (into
+`~/.ec2-sim`), and updates it when the app is updated. To run your own checkout
+instead, set it under **Settings → ec2-sim folder**.
 
 ## Requirements
 
@@ -234,7 +237,7 @@ export VAULT_TOKEN=...            # any variables your script needs
 uv run ec2-sim run -C /path/to/repo --region us-west-2 -e VAULT_TOKEN -- './build-ami.sh --env staging'
 ```
 
-The command runs in a disposable runner container (`images/runner`: Packer +
+The command runs in a disposable runner container (`ec2sim/images/runner`: Packer +
 Amazon plugin, AWS CLI v2, jq, sudo, `tempfile`) with:
 
 - the folder mounted **at the same path** (relative paths and log files behave as on a build host)
@@ -404,9 +407,9 @@ Commands: `ec2-sim` (serve), `ec2-sim up|down|reset|status|validate [stack.yaml]
 
 ## Adding a base AMI
 
-1. Add `images/<name>/Dockerfile`: install sshd and sudo, create the default user,
+1. Add `ec2sim/images/<name>/Dockerfile`: install sshd and sudo, create the default user,
    copy `common/ec2sim-init` as the entrypoint and set `EC2SIM_DEFAULT_USER`. For a
-   systemd image, follow `images/ubuntu-18.04` (`ec2sim-boot` entrypoint,
+   systemd image, follow `ec2sim/images/ubuntu-18.04` (`ec2sim-boot` entrypoint,
    `ec2sim-userdata.service`, `LABEL ec2sim.systemd="true"`).
 2. Add a `BaseAmi` entry in `ec2sim/catalog.py`.
 

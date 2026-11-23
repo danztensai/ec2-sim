@@ -48,14 +48,14 @@ export default function Overview({ go }: { go: (p: Page) => void }) {
           </Button>
           <ul className="checks">
             <Check ok={!!status?.docker}>Docker is {status?.docker ? "running" : "not reachable: start Docker Desktop / the Docker daemon"}</Check>
-            <Check ok={!!settings?.ec2sim_dir}>
-              ec2-sim folder: <code>{settings?.ec2sim_dir || "not set"}</code>{" "}
+            <Check ok>
+              ec2-sim: <code>{settings?.ec2sim_dir || "installed automatically with uv"}</code>{" "}
               <button className="link" onClick={() => go("settings")}>
                 change
               </button>
             </Check>
           </ul>
-          <p className="muted small">The first start builds the base images, which takes a few minutes; later starts take seconds.</p>
+          <p className="muted small">The first start installs ec2-sim (if no checkout is set) and builds the base images, which takes a few minutes; later starts take seconds.</p>
         </div>
       </div>
     );

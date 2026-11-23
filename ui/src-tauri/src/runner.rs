@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 use crate::host;
+use crate::source;
 
 #[derive(Default)]
 pub struct Runner {
@@ -24,32 +25,27 @@ fn build(ec2sim_dir: &str, dir: &str, command: &str, region: &str, env: &[(Strin
     if let Some(bad) = names.iter().find(|k| !valid_name(k)) {
         return Err(format!("invalid variable name: {bad}"));
     }
+    let mut args: Vec<&str> = vec!["run", "-C", dir, "--region", region];
+    for k in &names {
+        args.extend(["-e", k]);
+    }
+    args.extend(["--", command]);
     let mut c = match host::runtime() {
-        host::Runtime::Native => {
-            #[cfg(windows)]
-            let bin = std::path::Path::new(ec2sim_dir).join(".venv").join("Scripts").join("ec2-sim.exe");
-            #[cfg(not(windows))]
-            let bin = std::path::Path::new(ec2sim_dir).join(".venv").join("bin").join("ec2-sim");
-            let mut c = Command::new(bin);
-            c.args(["run", "-C", dir, "--region", region]);
-            for k in &names {
-                c.args(["-e", k]);
-            }
-            c.args(["--", command]);
-            host::hide_window(&mut c);
-            c
-        }
+        host::Runtime::Native => source::command(ec2sim_dir, &args)?,
         host::Runtime::Wsl { .. } => {
             // Values reach WSL through WSLENV; names go on the (quoted) command line.
             let e_args: String = names.iter().map(|k| format!(" -e {k}")).collect();
-            let script = format!(
-                "exec {}/.venv/bin/ec2-sim run -C {} --region {}{e_args} -- {}",
-                host::wsl_path(ec2sim_dir),
+            let src = source::source(ec2sim_dir);
+            if src == source::Source::Managed {
+                source::ensure_managed(&|_| {})?;
+            }
+            let quoted = format!(
+                "run -C {} --region {}{e_args} -- {}",
                 host::wsl_path(dir),
                 host::sh_quote(region),
                 host::sh_quote(command),
             );
-            let mut c = host::sh(&script);
+            let mut c = host::sh(&source::wsl_exec(&src, &quoted));
             let wslenv: String = names.iter().map(|k| format!("{k}/u")).collect::<Vec<_>>().join(":");
             let merged = match std::env::var("WSLENV") {
                 Ok(existing) if !existing.is_empty() => format!("{existing}:{wslenv}"),
@@ -126,21 +122,7 @@ impl Runner {
 
     /// Stop the runner container(s) and the local process.
     pub fn stop(&mut self, ec2sim_dir: &str) {
-        let stop = match host::runtime() {
-            host::Runtime::Native => {
-                #[cfg(windows)]
-                let bin = std::path::Path::new(ec2sim_dir).join(".venv").join("Scripts").join("ec2-sim.exe");
-                #[cfg(not(windows))]
-                let bin = std::path::Path::new(ec2sim_dir).join(".venv").join("bin").join("ec2-sim");
-                let mut c = Command::new(bin);
-                c.arg("stop-runs");
-                host::hide_window(&mut c);
-                c.status()
-            }
-            host::Runtime::Wsl { .. } => {
-                host::sh(&format!("{}/.venv/bin/ec2-sim stop-runs", host::wsl_path(ec2sim_dir))).status()
-            }
-        };
+        let stop = source::command(ec2sim_dir, &["stop-runs"]).map(|mut c| c.status());
         let _ = stop;
         if let Some(child) = self.child.take() {
             let _ = child.lock().unwrap().kill();
