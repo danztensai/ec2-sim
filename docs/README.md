@@ -12,6 +12,7 @@ through tasks end to end.
 | [Desktop app](desktop-app.md) | do all of that from the GUI (Windows, macOS, Linux) |
 | [Baking AMIs](baking-amis.md) | build AMIs by hand, with Packer, or by running your existing build script unmodified |
 | [Networking](networking.md) | connect instances to each other, and reach them from your computer by name |
+| [Stacks](stacks.md) | describe a whole environment (VPCs, security groups, instances, readiness) in one file and bring it up with one command |
 | [Multi-tier testing](multi-tier-testing.md) | run an app and its databases together in a VPC that mirrors production |
 | [Troubleshooting](troubleshooting.md) | fix something that doesn't work |
 | [Architecture](architecture.md) | understand how it works, or contribute |

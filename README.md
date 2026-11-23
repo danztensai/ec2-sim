@@ -24,6 +24,7 @@ launches and connects to instances, bakes AMIs and runs your build scripts from 
 | [Desktop app](docs/desktop-app.md) | a tour of the GUI, page by page |
 | [Baking AMIs](docs/baking-amis.md) | by hand, with Packer, or with your existing pipeline (`ec2-sim run`) |
 | [Networking](docs/networking.md) | instance ↔ instance, `http://<name>.localhost`, port forwards, security groups |
+| [Stacks](docs/stacks.md) | a whole environment in one file: `ec2-sim up stack.yaml` |
 | [Multi-tier testing](docs/multi-tier-testing.md) | an app and its databases in a VPC that mirrors production |
 | [Troubleshooting](docs/troubleshooting.md) | common problems and fixes |
 | [Architecture](docs/architecture.md) | how it works, code map, contributing |
@@ -230,6 +231,23 @@ Amazon plugin, AWS CLI v2, jq, sudo, `tempfile`) with:
 `ec2-sim stop-runs` stops running commands. The desktop app's **Run script** page does the same from the GUI.
 Scripts must have LF line endings: on Windows, run them from a checkout inside WSL.
 
+## Stacks: `ec2-sim up`
+
+Describe VPCs, subnets, security groups, key pairs, instance profiles and
+instances (with user data, fixed IPs, dependencies, readiness checks and port
+forwards) in one YAML file, then:
+
+```bash
+uv run ec2-sim up stack.yaml       # create what's missing, wait until ready (idempotent)
+uv run ec2-sim status stack.yaml
+uv run ec2-sim reset stack.yaml    # down + up
+uv run ec2-sim down stack.yaml
+```
+
+Examples: [`examples/stacks/hello`](examples/stacks/hello/stack.yaml) (runs in
+seconds) and [`examples/stacks/multi-tier`](examples/stacks/multi-tier/stack.yaml)
+(an app AMI next to MongoDB, Redis and Elasticsearch). Full reference: [docs/stacks.md](docs/stacks.md).
+
 ## Networking: instance ↔ instance and host → instance
 
 - **Inside a VPC** all instances share one Docker network (the VPC's CIDR), so
@@ -343,7 +361,7 @@ Both expect a running server on `localhost:4566`. In bastion mode, run them with
 | `EC2SIM_GATEWAY_BIND` | `127.0.0.1` | address the gateway publishes on |
 | `EC2SIM_GATEWAY_ACCESS` | `security-groups` | `security-groups` (inbound rules / `ec2sim:web` tag decide) or `open` |
 
-Commands: `ec2-sim` (serve), `ec2-sim build-images`, `ec2-sim cleanup`
+Commands: `ec2-sim` (serve), `ec2-sim up|down|reset|status|validate [stack.yaml]`, `ec2-sim build-images`, `ec2-sim cleanup`
 (remove stray instance containers and networks, keep AMIs), `ec2-sim ca-path`.
 
 ## State and persistence

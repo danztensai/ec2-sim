@@ -22,6 +22,11 @@ flowchart LR
 
 Replace the names, IPs and engines with what your app uses.
 
+> **Shortcut:** steps 2 to 4 are also a ready-made stack file,
+> [`examples/stacks/multi-tier`](../examples/stacks/multi-tier/stack.yaml):
+> `APP_AMI=ami-… uv run ec2-sim up examples/stacks/multi-tier/stack.yaml`.
+> See [Stacks](stacks.md). This page explains each step.
+
 ## 1. Find out what the app connects to
 
 Look in the baked AMI (launch it once, or check your build's config files) for

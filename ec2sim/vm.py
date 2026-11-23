@@ -316,6 +316,32 @@ class DockerVMManager:
                     name, driver="bridge", labels={_label("shared"): "true"}
                 ), False
 
+    def remove_vpc_network(self, vpc_id: str) -> None:
+        """DeleteVpc: drop the VPC's bridge network so its CIDR can be used again."""
+        with self._net_lock:
+            try:
+                net = self.client.networks.get(f"{config.PREFIX}-{vpc_id}")
+            except NotFound:
+                return
+            net.reload()
+            for cid in list(net.attrs.get("Containers") or {}):
+                try:
+                    c = self.client.containers.get(cid)
+                except NotFound:
+                    continue
+                if c.labels.get(_label("forward")):
+                    c.remove(force=True)  # a forward is useless without its network
+                else:  # helpers (gateway, bastion) stay; they just leave this network
+                    try:
+                        net.disconnect(c, force=True)
+                    except APIError:
+                        pass
+            try:
+                net.remove()
+                LOG.info("DeleteVpc %s: removed network %s", vpc_id, net.name)
+            except APIError as e:
+                LOG.warning("DeleteVpc %s: could not remove network %s: %s", vpc_id, net.name, e.explanation)
+
     # -------------------------------------------------------------- instances
     def run_instance(
         self,

@@ -1,0 +1,51 @@
+# The layout from docs/multi-tier-testing.md as one file: an app AMI next to
+# MongoDB + Redis and Elasticsearch, at the IPs and names the app expects.
+#
+#   APP_AMI=ami-…  uv run ec2-sim up examples/stacks/multi-tier/stack.yaml
+#
+# The databases install from the internet in user data (1 to 3 minutes);
+# `up` waits for their ports before it launches the app.
+name: multi-tier
+region: us-west-2
+
+vpcs:
+  - name: main
+    cidr: 10.7.0.0/16
+    subnets:
+      - {name: app, cidr: 10.7.1.0/24}
+
+security_groups:
+  - name: app-stack
+    vpc: main
+    ingress:
+      - {protocol: all, cidr: 10.7.0.0/16}
+      - {port: 80, cidr: 0.0.0.0/0}    # https://app-1.localhost and http://app-1.localhost
+      - {port: 443, cidr: 0.0.0.0/0}
+
+instances:
+  - name: db-1                         # baked /etc/hosts entries like "10.7.1.128 dbnode" point here
+    ami: ubuntu-18.04                  # systemd, so `systemctl enable` works
+    type: t3.medium
+    subnet: app
+    ip: 10.7.1.128
+    security_groups: [app-stack]
+    user_data_file: db.sh
+    ready: {port: 27017, timeout: 600}
+    forwards: [27017]                  # localhost:27017 for a database GUI
+
+  - name: search-1
+    ami: ubuntu-18.04
+    type: t3.medium
+    subnet: app
+    ip: 10.7.1.129
+    security_groups: [app-stack]
+    user_data_file: search.sh
+    ready: {port: 9200, timeout: 600}
+
+  - name: app-1
+    ami: ${APP_AMI}                    # or {name: "staging-v2-app*"} for the newest AMI by name
+    type: t3.large
+    subnet: app
+    ip: 10.7.1.10
+    security_groups: [app-stack]
+    depends_on: [db-1, search-1]

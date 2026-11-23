@@ -1,0 +1,48 @@
+# A two-tier smoke test: "db" comes up first (readiness: a file its user data
+# writes), then "app", which finds db by name. Runs in about 20 seconds.
+#
+#   uv run ec2-sim up examples/stacks/hello/stack.yaml
+#   uv run ec2-sim status examples/stacks/hello/stack.yaml
+#   uv run ec2-sim down examples/stacks/hello/stack.yaml
+name: hello
+region: us-west-2
+
+key_pairs: [hello]          # private key saved to ~/.ec2-sim/stacks/hello/hello.pem
+
+vpcs:
+  - name: main
+    cidr: 10.9.0.0/16
+    subnets:
+      - {name: app, cidr: 10.9.1.0/24}
+
+security_groups:
+  - name: stack
+    vpc: main
+    ingress:
+      - {protocol: all, cidr: 10.9.0.0/16}   # everything inside the VPC
+      - {port: 80, cidr: 0.0.0.0/0}          # http://app.localhost through the gateway
+
+instances:
+  - name: db
+    ami: ubuntu-24.04
+    subnet: app
+    ip: 10.9.1.128
+    security_groups: [stack]
+    key: hello
+    user_data: |
+      #!/bin/bash
+      sleep 3
+      touch /tmp/db-ready
+    ready: {command: "test -f /tmp/db-ready", timeout: 120}
+    forwards: [{port: 22, local: 12222}]     # ssh -p 12222 -i ~/.ec2-sim/stacks/hello/hello.pem ubuntu@127.0.0.1
+
+  - name: app
+    ami: ubuntu-24.04
+    subnet: app
+    security_groups: [stack]
+    key: hello
+    depends_on: [db]
+    user_data: |
+      #!/bin/bash
+      getent hosts db > /tmp/db-address
+    ready: {command: "grep -q 10.9.1.128 /tmp/db-address", timeout: 120}

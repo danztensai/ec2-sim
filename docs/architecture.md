@@ -43,11 +43,12 @@ flowchart TB
 | File | Role |
 |---|---|
 | `ec2sim/server.py` | CLI (`serve`, `run`, `forward`, `gateway`, `cleanup`, …) and startup order |
-| `ec2sim/patches.py` | Hooks on moto's EC2 model: `RunInstances` → boot a container, start/stop/reboot/terminate, `CreateImage` (bakes in a background thread: pending → available), `CopyImage`, `RegisterImage docker://`, `DeregisterImage`, `_custom_id_` for security groups |
+| `ec2sim/patches.py` | Hooks on moto's EC2 model: `RunInstances` → boot a container, start/stop/reboot/terminate, `CreateImage` (bakes in a background thread: pending → available), `CopyImage`, `RegisterImage docker://`, `DeregisterImage`, `_custom_id_` for security groups, `DeleteVpc` removes the VPC's network, terminate frees the instance's subnet IP |
 | `ec2sim/vm.py` | Everything Docker: per-VPC networks, IP and DNS aliases, systemd run options, commit with the `/etc/hosts` label, IMDS proxy, bastion, port forwards, the gateway's nginx config |
 | `ec2sim/access.py` | Works out which instance ports the gateway allows (security group rules from IP ranges, `ec2sim:web` tag, open mode) and resyncs every 2 s |
 | `ec2sim/imds.py` | Instance metadata (IMDSv1/v2), user data, identity document, instance-profile credentials |
 | `ec2sim/run.py` | `ec2-sim run`: the disposable runner container |
+| `ec2sim/stack.py` | `ec2-sim up/down/reset/status/validate`: parses a stack file and applies it through the EC2/IAM API (boto3), tagging everything `ec2sim:stack` |
 | `ec2sim/catalog.py` | Base AMIs and `EC2SIM_AMI_ALIASES` |
 | `ec2sim/config.py` | All `EC2SIM_*` settings |
 | `images/` | Base AMIs (`amazonlinux-2023`, `ubuntu-24.04`, `ubuntu-18.04` / `ubuntu-26.04` with systemd), `runner`, `bastion`, `forwarder`, shared init scripts |
@@ -77,7 +78,7 @@ flowchart TB
 ## Tests
 
 ```bash
-uv run pytest -q tests/unit   # access rules, /etc/hosts handling (no server needed)
+uv run pytest -q tests/unit   # access rules, /etc/hosts handling, stack files (no server needed)
 ./tests/smoke.sh              # end to end with the AWS CLI (server running)
 ./tests/e2e/run-packer.sh     # Packer amazon-ebs build (server running)
 cd ui && npx tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml

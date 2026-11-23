@@ -421,9 +421,11 @@ name = "ec2-sim"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
     { name = "cryptography" },
     { name = "docker" },
     { name = "moto", extra = ["server"] },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -433,9 +435,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", specifier = ">=1.40" },
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "docker", specifier = ">=7.2.0" },
     { name = "moto", extras = ["ec2", "server"], specifier = ">=5.2.5" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]

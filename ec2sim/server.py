@@ -162,6 +162,18 @@ def main(argv: list[str] | None = None) -> None:
     uf = sub.add_parser("unforward", help="remove a port forward (NAME from `forwards`) or --all")
     uf.add_argument("name", nargs="?")
     uf.add_argument("--all", action="store_true")
+    for name, text in (("up", "create a stack's missing resources and wait until it's ready"),
+                       ("down", "remove everything a stack created"),
+                       ("reset", "down, then up"),
+                       ("status", "show a stack's instances, IPs and readiness"),
+                       ("validate", "check a stack file without touching anything")):
+        sp = sub.add_parser(name, help=text, description=f"{text}. See docs/stacks.md.")
+        sp.add_argument("file", nargs="?", default="stack.yaml", help="stack file (default: stack.yaml)")
+        sp.add_argument("--endpoint", help="ec2-sim API (default: http://127.0.0.1:EC2SIM_PORT)")
+        if name in ("up", "reset"):
+            sp.add_argument("--no-wait", action="store_true", help="don't wait for readiness checks")
+        if name == "status":
+            sp.add_argument("--json", action="store_true")
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
     args = parser.parse_args(argv)
@@ -171,6 +183,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
+    if args.cmd in ("up", "down", "reset", "status", "validate"):
+        from . import stack
+
+        logging.getLogger("ec2sim").setLevel(logging.WARNING)
+        sys.exit(stack.main(args.cmd, args.file, args.endpoint, wait=not getattr(args, "no_wait", False),
+                            as_json=getattr(args, "json", False)))
     if args.cmd == "run":
         from . import run as run_mod
 

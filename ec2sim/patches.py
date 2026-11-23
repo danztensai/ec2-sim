@@ -92,9 +92,15 @@ def _set_public_ip(instance: Instance, ip: str | None) -> None:
         instance.nics[0].public_ip = ip
 
 
+_APPLIED = False
+
+
 def apply(vm: DockerVMManager | None) -> None:
-    global VM
+    global VM, _APPLIED
     VM = vm
+    if _APPLIED:  # the wrappers read VM at call time; wrap only once
+        return
+    _APPLIED = True
 
     # ------------------------------------------------------------------ AMIs
     @_wrap(AmiBackend, "_load_amis")
@@ -266,6 +272,19 @@ def apply(vm: DockerVMManager | None) -> None:
             finally:
                 sg_module.random_security_group_id = saved
 
+    # ------------------------------------------------------------------ VPCs
+    from moto.ec2.models.vpcs import VPCBackend
+
+    @_wrap(VPCBackend, "delete_vpc")
+    def delete_vpc(original, self: Any, vpc_id: str):
+        vpc = original(self, vpc_id)
+        if VM is not None:
+            try:
+                VM.remove_vpc_network(vpc_id)
+            except Exception:  # noqa: BLE001 - never fail the API call over cleanup
+                LOG.exception("could not remove the network of %s", vpc_id)
+        return vpc
+
     # ------------------------------------------------------------- instances
     @_wrap(InstanceBackend, "run_instances")
     def run_instances(original, self: Any, image_id: str, count: int, user_data: Any,
@@ -345,6 +364,15 @@ def apply(vm: DockerVMManager | None) -> None:
     @_wrap(Instance, "terminate")
     def terminate(original, self: Instance):
         prev = original(self)
+        # moto frees an instance's subnet IPs only when the object is garbage
+        # collected, which never happens while it is listed as terminated: a
+        # relaunch at the same --private-ip-address would fail with "IP already in use".
+        try:
+            subnet = self.ec2_backend.get_subnet(self.subnet_id)
+            for ip in list(getattr(self, "_private_ips", ())):
+                subnet.del_subnet_ip(ip)
+        except Exception:  # noqa: BLE001
+            pass
         if VM is not None:
             VM.terminate_instance(self.id)
         return prev

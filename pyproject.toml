@@ -8,7 +8,9 @@ license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "cryptography>=50.0.2",
     "docker>=7.2.0",
+    "boto3>=1.40",
     "moto[ec2,server]>=5.2.5",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
