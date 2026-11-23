@@ -10,6 +10,14 @@ The screenshots use demo data. To regenerate them, see
 
 ## Install and run
 
+The easiest way: download the installer for your OS from
+[Releases](https://github.com/danztensai/ec2-sim/releases/latest) (`.msi`/`-setup.exe`,
+`.dmg`, `.deb`/`.rpm`/`.AppImage`). A new release is built on every push to `main`.
+The app isn't code-signed yet: on macOS, right-click → **Open** the first time. On
+Windows, choose **More info → Run anyway** if SmartScreen warns.
+
+To build it yourself:
+
 | Your machine | How |
 |---|---|
 | Windows | Build the native Windows app; it drives ec2-sim inside WSL. See [Windows with ec2-sim in WSL](../ui/README.md#windows-with-ec2-sim-in-wsl-recommended-on-windows). |

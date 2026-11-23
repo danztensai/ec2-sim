@@ -50,6 +50,20 @@ moto owns the API surface (request parsing, validation, responses, filters).
 ec2-sim wraps moto's EC2 model methods (`ec2sim/patches.py`) so lifecycle calls
 also drive Docker (`ec2sim/vm.py`).
 
+## Download the desktop app
+
+Installers for Linux (`.deb`, `.rpm`, `.AppImage`), macOS (universal `.dmg`, Intel and
+Apple Silicon) and Windows (`.msi`, `-setup.exe`) are on the
+[Releases page](https://github.com/danztensai/ec2-sim/releases/latest). Every push to
+`main` builds a new release automatically. The app isn't code-signed yet:
+
+- **macOS:** the first time, right-click the app → **Open**, or run
+  `xattr -cr /Applications/ec2-sim.app`.
+- **Windows:** SmartScreen may warn; choose **More info → Run anyway**.
+
+The app drives ec2-sim from a checkout of this repository (Settings → ec2-sim folder),
+so you still need the CLI requirements below.
+
 ## Requirements
 
 - Docker: native Docker Engine on Linux or WSL2, OrbStack, or Docker Desktop on
@@ -395,6 +409,15 @@ Commands: `ec2-sim` (serve), `ec2-sim up|down|reset|status|validate [stack.yaml]
    systemd image, follow `images/ubuntu-18.04` (`ec2sim-boot` entrypoint,
    `ec2sim-userdata.service`, `LABEL ec2sim.systemd="true"`).
 2. Add a `BaseAmi` entry in `ec2sim/catalog.py`.
+
+## Releases
+
+`.github/workflows/release.yml` runs on every push to `main`/`master`: unit tests,
+then the desktop app is built on Linux, macOS and Windows runners and published as
+release `vMAJOR.MINOR.N`. MAJOR.MINOR come from `ui/package.json`, and N is the
+workflow run number. Bump MAJOR.MINOR there for a feature release. The release
+stays a draft until every platform has uploaded its installers. If a build fails,
+the draft is deleted. `SHA256SUMS.txt` lists the checksums of all files.
 
 ## License
 

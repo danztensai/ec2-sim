@@ -40,6 +40,12 @@ A page-by-page tour is in [docs/desktop-app.md](../docs/desktop-app.md).
 - **Settings**: ec2-sim folder, endpoint, region, auto-start, and extra
   environment for the server (e.g. `EC2SIM_AMI_ALIASES`).
 
+## Download
+
+Prebuilt installers for Linux, macOS and Windows:
+[Releases](https://github.com/danztensai/ec2-sim/releases/latest). They're built by
+`.github/workflows/release.yml` on every push to `main`. To build it yourself, see below.
+
 ## Run it
 
 Requirements: everything ec2-sim needs (Docker, uv), plus Rust (stable) and

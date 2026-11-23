@@ -1,0 +1,157 @@
+# Every push to main/master: test, build the desktop app for Linux, macOS and
+# Windows, and publish a GitHub release with the installers.
+#
+# Version: MAJOR.MINOR from ui/package.json, PATCH = this workflow's run number
+# (0.1.0 in package.json -> v0.1.1, v0.1.2, …). Bump MAJOR.MINOR in
+# ui/package.json for a feature release; the patch keeps counting.
+#
+# The release is created as a draft and published only when every build has
+# uploaded its installers, so a failed build never leaves a half-empty release.
+name: release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv sync --frozen
+      - run: uv run pytest -q tests/unit
+      - name: Validate example stacks
+        run: |
+          uv run ec2-sim validate examples/stacks/hello/stack.yaml
+          APP_AMI=ami-0ec2511b180400001 uv run ec2-sim validate examples/stacks/multi-tier/stack.yaml
+
+  draft:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release_id: ${{ steps.r.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        name: Version
+        run: |
+          base=$(node -p "require('./ui/package.json').version.split('.').slice(0,2).join('.')")
+          echo "version=$base.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - id: r
+        name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          id=$(gh api -X POST "repos/${{ github.repository }}/releases" \
+            -f tag_name="v$VERSION" -f target_commitish="${{ github.sha }}" \
+            -f name="ec2-sim v$VERSION" -F draft=true -F generate_release_notes=true --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04   # oldest glibc we support: the .deb/.AppImage run on newer distros too
+            args: ""
+          - os: macos-latest
+            args: "--target universal-apple-darwin"
+          - os: windows-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ui/src-tauri -> target
+
+      - run: npm ci
+        working-directory: ui
+
+      - name: Set version (tauri.conf.json is what the installers use)
+        shell: bash
+        working-directory: ui
+        env:
+          VERSION: ${{ needs.draft.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs"), f = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(f));
+            c.version = process.env.VERSION;
+            // Ad-hoc signature: without one, macOS on Apple Silicon reports the app as damaged.
+            c.bundle.macOS = { ...(c.bundle.macOS || {}), signingIdentity: "-" };
+            fs.writeFileSync(f, JSON.stringify(c, null, 2));
+          '
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: ui
+          tauriScript: npm run tauri
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          args: ${{ matrix.args }}
+          retryAttempts: 1
+
+  publish:
+    needs: [draft, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checksums and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.draft.outputs.version }}
+          ID: ${{ needs.draft.outputs.release_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir assets && cd assets
+          gh api "repos/$REPO/releases/$ID/assets" --paginate --jq '.[] | "\(.id) \(.name)"' |
+            while read -r aid name; do
+              gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$aid" > "$name"
+            done
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh api "repos/$REPO/releases/$ID/assets" --jq '.[].name' | grep -qx SHA256SUMS.txt ||
+            curl -sSf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: text/plain" \
+              --data-binary @SHA256SUMS.txt \
+              "https://uploads.github.com/repos/$REPO/releases/$ID/assets?name=SHA256SUMS.txt" > /dev/null
+          gh api -X PATCH "repos/$REPO/releases/$ID" -F draft=false -f make_latest=true --jq .html_url
+
+  cleanup:
+    # A build failed: delete the draft so it doesn't pile up (the run's logs keep the details).
+    needs: [draft, build]
+    if: failure() && needs.draft.outputs.release_id != ''
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/releases/${{ needs.draft.outputs.release_id }}"
